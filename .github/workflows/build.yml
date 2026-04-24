@@ -1,0 +1,44 @@
+name: Build
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "firmware/**"
+      - ".github/workflows/build.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "firmware/**"
+      - ".github/workflows/build.yml"
+
+jobs:
+  build-mduv380:
+    name: MDUV380 firmware
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi cmake
+
+      - name: Configure
+        run: cmake -S firmware -B firmware/build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build firmware/build -j$(nproc)
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: WaveForge-MDUV380-${{ github.sha }}
+          path: |
+            firmware/build/WaveForge.bin
+            firmware/build/WaveForge.hex
+            firmware/build/WaveForge.elf
+          if-no-files-found: error
+          retention-days: 30
