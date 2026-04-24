@@ -13,9 +13,22 @@ on:
       - ".github/workflows/build.yml"
 
 jobs:
-  build-mduv380:
-    name: MDUV380 firmware
+  build:
+    name: ${{ matrix.preset }}
     runs-on: ubuntu-latest
+    # All 8 variants run in parallel; one failure does not cancel the others.
+    strategy:
+      fail-fast: false
+      matrix:
+        preset:
+          - mduv380
+          - mduv380-10w
+          - mduv380-ja
+          - mduv380-10w-ja
+          - dm1701
+          - dm1701-ja
+          - rt84
+          - rt84-ja
 
     steps:
       - name: Checkout
@@ -27,18 +40,21 @@ jobs:
           sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi cmake
 
       - name: Configure
-        run: cmake -S firmware -B firmware/build -DCMAKE_BUILD_TYPE=Debug
+        working-directory: firmware
+        run: cmake --preset ${{ matrix.preset }}
 
       - name: Build
-        run: cmake --build firmware/build -j$(nproc)
+        working-directory: firmware
+        run: cmake --build --preset ${{ matrix.preset }} -j$(nproc)
 
-      - name: Upload firmware artifacts
+      - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WaveForge-MDUV380-${{ github.sha }}
+          name: ${{ matrix.preset }}-${{ github.sha }}
+          # Upload the distribution binary produced by codec_cleaner (Open*.bin).
+          # The raw WaveForge.bin and .hex are included for debugging/flashing.
           path: |
-            firmware/build/WaveForge.bin
-            firmware/build/WaveForge.hex
-            firmware/build/WaveForge.elf
+            firmware/build/${{ matrix.preset }}/Open*.bin
+            firmware/build/${{ matrix.preset }}/WaveForge.hex
           if-no-files-found: error
           retention-days: 30

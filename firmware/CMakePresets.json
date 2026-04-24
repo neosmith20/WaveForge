@@ -1,0 +1,71 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "mduv380",
+      "displayName": "TYT MD-UV380",
+      "inherits": "base",
+      "cacheVariables": { "PLATFORM": "MDUV380" }
+    },
+    {
+      "name": "mduv380-10w",
+      "displayName": "TYT MD-UV380 10W+",
+      "inherits": "base",
+      "cacheVariables": { "PLATFORM": "MDUV380", "UV380_10W_PLUS": "ON" }
+    },
+    {
+      "name": "mduv380-ja",
+      "displayName": "TYT MD-UV380 Japanese",
+      "inherits": "base",
+      "cacheVariables": { "PLATFORM": "MDUV380", "JAPANESE": "ON" }
+    },
+    {
+      "name": "mduv380-10w-ja",
+      "displayName": "TYT MD-UV380 10W+ Japanese",
+      "inherits": "base",
+      "cacheVariables": { "PLATFORM": "MDUV380", "UV380_10W_PLUS": "ON", "JAPANESE": "ON" }
+    },
+    {
+      "name": "dm1701",
+      "displayName": "Baofeng DM-1701",
+      "inherits": "base",
+      "cacheVariables": { "PLATFORM": "DM1701" }
+    },
+    {
+      "name": "dm1701-ja",
+      "displayName": "Baofeng DM-1701 Japanese",
+      "inherits": "base",
+      "cacheVariables": { "PLATFORM": "DM1701", "JAPANESE": "ON" }
+    },
+    {
+      "name": "rt84",
+      "displayName": "Radioddity RT-84",
+      "inherits": "base",
+      "cacheVariables": { "PLATFORM": "RT84" }
+    },
+    {
+      "name": "rt84-ja",
+      "displayName": "Radioddity RT-84 Japanese",
+      "inherits": "base",
+      "cacheVariables": { "PLATFORM": "RT84", "JAPANESE": "ON" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "mduv380",       "configurePreset": "mduv380"       },
+    { "name": "mduv380-10w",   "configurePreset": "mduv380-10w"   },
+    { "name": "mduv380-ja",    "configurePreset": "mduv380-ja"    },
+    { "name": "mduv380-10w-ja","configurePreset": "mduv380-10w-ja"},
+    { "name": "dm1701",        "configurePreset": "dm1701"        },
+    { "name": "dm1701-ja",     "configurePreset": "dm1701-ja"     },
+    { "name": "rt84",          "configurePreset": "rt84"          },
+    { "name": "rt84-ja",       "configurePreset": "rt84-ja"       }
+  ]
+}
