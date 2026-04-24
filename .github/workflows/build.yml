@@ -37,7 +37,10 @@ jobs:
       - name: Install toolchain
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi cmake
+          sudo apt-get install -y --no-install-recommends \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi \
+            cmake
 
       - name: Configure
         working-directory: firmware
@@ -51,7 +54,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.preset }}-${{ github.sha }}
-          # Upload the distribution binary produced by codec_cleaner (Open*.bin).
+          # Upload the distribution binary produced by codec_cleaner (WaveForge_*.bin).
           # The raw WaveForge.bin and .hex are included for debugging/flashing.
           path: |
             firmware/build/${{ matrix.preset }}/WaveForge_*.bin

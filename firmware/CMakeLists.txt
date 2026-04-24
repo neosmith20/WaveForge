@@ -390,8 +390,7 @@ add_custom_command(TARGET WaveForge.elf POST_BUILD
         $<TARGET_FILE:WaveForge.elf>
         ${CMAKE_CURRENT_BINARY_DIR}/WaveForge.bin
     COMMAND ${CMAKE_SIZE} --format=berkeley $<TARGET_FILE:WaveForge.elf>
-    # Produce the distribution artifact (Open<Platform>.bin) that matches
-    # the Eclipse postbuildStep output name expected by the firmware loader.
+    # Produce the distribution artifact (WaveForge_<Platform>.bin).
     COMMAND "${CODEC_CLEANER}"
         -i "${CMAKE_CURRENT_BINARY_DIR}/WaveForge.bin"
         -o "${CMAKE_CURRENT_BINARY_DIR}/${OUTPUT_BASE}.bin"
