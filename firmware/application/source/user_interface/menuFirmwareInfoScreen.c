@@ -29,6 +29,7 @@
 #include "user_interface/menuSystem.h"
 #include "user_interface/uiLocalisation.h"
 #include "user_interface/uiUtilities.h"
+#include "version.h"
 
 
 enum
@@ -162,11 +163,8 @@ static void displayBuildDetails(bool playVP)
 #if !defined(PLATFORM_GD77S)
 	char versionBuf[SCREEN_LINE_BUFFER_SIZE];
 	const char *radioModel = "WaveForge";
-	char dateTimeBuf[SCREEN_LINE_BUFFER_SIZE];
 
 	displayClearBuf();
-
-	sprintf(dateTimeBuf, "%d%02d%02d%02d%02d%02d", BUILD_YEAR, BUILD_MONTH, BUILD_DAY, BUILD_HOUR, BUILD_MIN, BUILD_SEC);
 
 #if defined(PLATFORM_MD9600) || defined(PLATFORM_MDUV380) || defined(PLATFORM_MD380) || defined(PLATFORM_RT84_DM1701) || defined(PLATFORM_MD2017)
 	snprintf(versionBuf, SCREEN_LINE_BUFFER_SIZE, "[ %s", XSTRINGIFY(GITVERSION));
@@ -179,13 +177,13 @@ static void displayBuildDetails(bool playVP)
 
 #if defined(PLATFORM_RD5R)
 	displayPrintCentered(0, radioModel, FONT_SIZE_3);
-	displayPrintCentered(10, currentLanguage->built, FONT_SIZE_2);
-	displayPrintCentered(20, dateTimeBuf , FONT_SIZE_2);
+	displayPrintCentered(10, "Version", FONT_SIZE_2);
+	displayPrintCentered(20, WAVEFORGE_VERSION, FONT_SIZE_2);
 	displayPrintCentered(30, versionBuf, FONT_SIZE_2);
 #else
 	displayPrintCentered(5, radioModel, FONT_SIZE_3);
-	displayPrintCentered(20, currentLanguage->built, FONT_SIZE_2);
-	displayPrintCentered(30, dateTimeBuf , FONT_SIZE_2);
+	displayPrintCentered(20, "Version", FONT_SIZE_2);
+	displayPrintCentered(30, WAVEFORGE_VERSION, FONT_SIZE_2);
 	displayPrintCentered(40, versionBuf, FONT_SIZE_2);
 #endif
 
@@ -218,8 +216,7 @@ static void displayBuildDetails(bool playVP)
 		voicePromptsInit();
 		voicePromptsAppendPrompt(PROMPT_SILENCE);
 		voicePromptsAppendLanguageString(radioModel);
-		voicePromptsAppendLanguageString(currentLanguage->built);
-		voicePromptsAppendString(dateTimeBuf);
+		voicePromptsAppendString(WAVEFORGE_VERSION);
 		voicePromptsAppendLanguageString(currentLanguage->gitCommit);
 		voicePromptsAppendString(versionBuf);
 #if defined(PLATFORM_MD9600) || defined(PLATFORM_MDUV380) || defined(PLATFORM_MD380) || defined(PLATFORM_RT84_DM1701) || defined(PLATFORM_MD2017)
