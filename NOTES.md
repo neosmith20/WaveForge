@@ -113,6 +113,34 @@ Three source changes in `firmware/application/source/user_interface/`:
 | `menuFirmwareInfoScreen.c` | Firmware info radio model label → `"WaveForge"` |
 | `menuFirmwareInfoScreen.c` | Credits roll: added `"-- WaveForge --"` and `"Alex W0PWR"` |
 
+### 4. `version.h` — Semantic Version Replaces Build Timestamp (committed as `d4d41ac`)
+
+Added `firmware/application/include/version.h` defining a single source of truth for
+the firmware version:
+
+```c
+#define WAVEFORGE_VERSION_MAJOR 1
+#define WAVEFORGE_VERSION_MINOR 0
+#define WAVEFORGE_VERSION_PATCH 0
+#define WAVEFORGE_VERSION_STRING "1.0.0"
+```
+
+`menuFirmwareInfoScreen.c` was updated to display `WAVEFORGE_VERSION_STRING` on the
+firmware info screen instead of the old `__DATE__`/`__TIME__` build timestamp. This
+gives reproducible, human-readable version strings that survive repeated builds.
+
+**To bump the version:** edit the three `_MAJOR`/`_MINOR`/`_PATCH` defines in
+`version.h` and the `_STRING` macro. Increment patch for bug fixes, minor for new
+features, major for breaking changes.
+
+### 5. GUI Flasher — Idea Noted
+
+Discussed the idea of a small GUI flasher tool (Windows/macOS/Linux) that wraps the
+`st-flash` / OpenOCD command line so end-users can flash WaveForge without a terminal.
+Key UX goals: auto-detect connected ST-Link, present a file picker for the `.bin`,
+enforce the correct `0x800C000` flash address, and show progress. Captured in the
+roadmap below.
+
 ---
 
 ## The Codec Binary Situation
@@ -160,6 +188,12 @@ produce a zero-filled placeholder blob if the real blob is absent.
 ---
 
 ## Roadmap
+
+### UX / tooling
+- [ ] **GUI flasher tool** — cross-platform desktop app (Tk, Electron, or similar) that
+  wraps `st-flash`/OpenOCD: auto-detects ST-Link, file picker for `.bin`, enforces
+  `0x800C000` flash address, shows progress. Removes the usbipd/terminal barrier for
+  end users who just want to flash and go.
 
 ### Near-term (build system / infrastructure)
 - [ ] **Verify CI passes end-to-end** — confirm all 8 matrix jobs go green
