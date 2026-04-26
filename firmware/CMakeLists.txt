@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.22)
 set(CMAKE_TOOLCHAIN_FILE ${CMAKE_CURRENT_SOURCE_DIR}/cmake/arm-none-eabi.cmake
     CACHE FILEPATH "Cross-compilation toolchain file")
 
-project(WaveForge C ASM)
+project(ClearDMR C ASM)
 
 # ─── Build instructions ────────────────────────────────────────────────────────
 # Configure:  cmake -S firmware -B firmware/build -DCMAKE_BUILD_TYPE=Debug
@@ -49,7 +49,7 @@ if(PLATFORM STREQUAL "MDUV380")
     if(UV380_10W_PLUS)
         list(APPEND PLATFORM_DEFINES PLATFORM_VARIANT_UV380_PLUS_10W)
     endif()
-    set(OUTPUT_BASE "WaveForge_MDUV380")
+    set(OUTPUT_BASE "ClearDMR_MDUV380")
     if(UV380_10W_PLUS)
         string(APPEND OUTPUT_BASE "_10W_PLUS")
     endif()
@@ -60,10 +60,10 @@ elseif(PLATFORM STREQUAL "DM1701")
     if(NOT JAPANESE)
         list(APPEND PLATFORM_DEFINES PLATFORM_VARIANT_DM1701)
     endif()
-    set(OUTPUT_BASE "WaveForge_DM1701")
+    set(OUTPUT_BASE "ClearDMR_DM1701")
 elseif(PLATFORM STREQUAL "RT84")
     set(PLATFORM_DEFINES PLATFORM_RT84_DM1701)
-    set(OUTPUT_BASE "WaveForge_RT84")
+    set(OUTPUT_BASE "ClearDMR_RT84")
 else()
     message(FATAL_ERROR
         "Unknown PLATFORM '${PLATFORM}'. Valid: MDUV380 | DM1701 | RT84")
@@ -74,7 +74,7 @@ if(JAPANESE)
     string(APPEND OUTPUT_BASE "_Japanese")
 endif()
 
-message(STATUS "WaveForge: platform=${PLATFORM}  10W=${UV380_10W_PLUS}"
+message(STATUS "ClearDMR: platform=${PLATFORM}  10W=${UV380_10W_PLUS}"
     "  japanese=${JAPANESE}  → ${OUTPUT_BASE}.bin")
 
 # ─── Complication 2: codec binary blob ────────────────────────────────────────
@@ -108,7 +108,7 @@ add_custom_command(
 add_custom_target(codec_blob_gen DEPENDS "${CODEC_BIN_BLOB}")
 
 # Write the assembly wrapper at configure time — the blob path is already known.
-# add_dependencies(WaveForge.elf codec_blob_gen) below guarantees the blob
+# add_dependencies(ClearDMR.elf codec_blob_gen) below guarantees the blob
 # exists before the assembler processes this file.
 file(WRITE "${CODEC_BIN_ASM}"
     ".section .codec_bin_section_1\n"
@@ -281,7 +281,7 @@ set(APP_SOURCES
 )
 
 # ─── Executable ───────────────────────────────────────────────────────────────
-add_executable(WaveForge.elf
+add_executable(ClearDMR.elf
     ${CORE_SOURCES}
     ${HAL_SOURCES}
     ${FREERTOS_SOURCES}
@@ -293,11 +293,11 @@ add_executable(WaveForge.elf
 
 # Guarantee codec_cleaner has run before any source in the target is assembled.
 # add_dependencies at target level means the entire codec_blob_gen target
-# completes before WaveForge.elf starts building any of its sources.
-add_dependencies(WaveForge.elf codec_blob_gen)
+# completes before ClearDMR.elf starts building any of its sources.
+add_dependencies(ClearDMR.elf codec_blob_gen)
 
 # ─── Compiler definitions ─────────────────────────────────────────────────────
-target_compile_definitions(WaveForge.elf PRIVATE
+target_compile_definitions(ClearDMR.elf PRIVATE
     USE_HAL_DRIVER
     STM32F405xx
     ${PLATFORM_DEFINES}
@@ -307,7 +307,7 @@ target_compile_definitions(WaveForge.elf PRIVATE
 
 # ─── Include paths ────────────────────────────────────────────────────────────
 # Vendor headers are marked SYSTEM to suppress warnings from third-party code.
-target_include_directories(WaveForge.elf SYSTEM PRIVATE
+target_include_directories(ClearDMR.elf SYSTEM PRIVATE
     Drivers/CMSIS/Include
     Drivers/CMSIS/Device/ST/STM32F4xx/Include
     Drivers/STM32F4xx_HAL_Driver/Inc
@@ -318,7 +318,7 @@ target_include_directories(WaveForge.elf SYSTEM PRIVATE
     Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc
     Middlewares/ST/STM32_USB_Device_Library/Core/Inc
 )
-target_include_directories(WaveForge.elf PRIVATE
+target_include_directories(ClearDMR.elf PRIVATE
     # Core/Inc first: stm32f4xx_hal_conf.h and FreeRTOSConfig.h live here and
     # must be found before any HAL or FreeRTOS headers that include them.
     Core/Inc
@@ -330,7 +330,7 @@ target_include_directories(WaveForge.elf PRIVATE
 )
 
 # ─── Compile options ──────────────────────────────────────────────────────────
-target_compile_options(WaveForge.elf PRIVATE
+target_compile_options(ClearDMR.elf PRIVATE
     ${MCU_FLAGS}
     -Os
     -g3
@@ -366,33 +366,33 @@ set_source_files_properties(
 # STM32F405VGTX_FLASH.ld sets FLASH origin to 0x800C000 (after the 48 KB
 # bootloader) and places the codec binary at absolute address 0x807537C.
 # Both constraints must survive the linker step unchanged.
-target_link_options(WaveForge.elf PRIVATE
+target_link_options(ClearDMR.elf PRIVATE
     ${MCU_FLAGS}
     -T${CMAKE_CURRENT_SOURCE_DIR}/STM32F405VGTX_FLASH.ld
-    -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/WaveForge.map,--cref
+    -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/ClearDMR.map,--cref
     -Wl,--gc-sections
     --specs=nano.specs
     -Wl,--print-memory-usage
 )
-target_link_libraries(WaveForge.elf PRIVATE m)
+target_link_libraries(ClearDMR.elf PRIVATE m)
 
 # Ensure the linker re-runs if the linker script changes.
-set_target_properties(WaveForge.elf PROPERTIES
+set_target_properties(ClearDMR.elf PROPERTIES
     LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/STM32F405VGTX_FLASH.ld
 )
 
 # ─── Post-build: generate flashable images ────────────────────────────────────
-add_custom_command(TARGET WaveForge.elf POST_BUILD
+add_custom_command(TARGET ClearDMR.elf POST_BUILD
     COMMAND ${CMAKE_OBJCOPY} -O ihex
-        $<TARGET_FILE:WaveForge.elf>
-        ${CMAKE_CURRENT_BINARY_DIR}/WaveForge.hex
+        $<TARGET_FILE:ClearDMR.elf>
+        ${CMAKE_CURRENT_BINARY_DIR}/ClearDMR.hex
     COMMAND ${CMAKE_OBJCOPY} -O binary
-        $<TARGET_FILE:WaveForge.elf>
-        ${CMAKE_CURRENT_BINARY_DIR}/WaveForge.bin
-    COMMAND ${CMAKE_SIZE} --format=berkeley $<TARGET_FILE:WaveForge.elf>
-    # Produce the distribution artifact (WaveForge_<Platform>.bin).
+        $<TARGET_FILE:ClearDMR.elf>
+        ${CMAKE_CURRENT_BINARY_DIR}/ClearDMR.bin
+    COMMAND ${CMAKE_SIZE} --format=berkeley $<TARGET_FILE:ClearDMR.elf>
+    # Produce the distribution artifact (ClearDMR_<Platform>.bin).
     COMMAND "${CODEC_CLEANER}"
-        -i "${CMAKE_CURRENT_BINARY_DIR}/WaveForge.bin"
+        -i "${CMAKE_CURRENT_BINARY_DIR}/ClearDMR.bin"
         -o "${CMAKE_CURRENT_BINARY_DIR}/${OUTPUT_BASE}.bin"
     COMMENT "Packaging ${OUTPUT_BASE}.bin"
 )

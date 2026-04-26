@@ -52,7 +52,7 @@ static const char *creditTexts[] =
 		"Dzmitry EW1ADG",
 #endif
 		"Jason VK7ZJA (SK)",
-		"-- WaveForge --", "Alex W0PWR"
+		"-- ClearDMR --", "Alex W0PWR"
 };
 static const int maxCredits = (sizeof(creditTexts) / sizeof(creditTexts[0]));
 static const int maxCreditsPages = (maxCredits / maxDisplayedCreditsLines) + ((maxCredits % maxDisplayedCreditsLines) == 0 ? 0 : 1);
@@ -162,7 +162,7 @@ static void displayBuildDetails(bool playVP)
 {
 #if !defined(PLATFORM_GD77S)
 	char versionBuf[SCREEN_LINE_BUFFER_SIZE];
-	const char *radioModel = "WaveForge";
+	const char *radioModel = "ClearDMR";
 
 	displayClearBuf();
 

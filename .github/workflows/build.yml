@@ -54,10 +54,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.preset }}-${{ github.sha }}
-          # Upload the distribution binary produced by codec_cleaner (WaveForge_*.bin).
-          # The raw WaveForge.bin and .hex are included for debugging/flashing.
+          # Upload the distribution binary produced by codec_cleaner (ClearDMR_*.bin).
+          # The raw ClearDMR.bin and .hex are included for debugging/flashing.
           path: |
-            firmware/build/${{ matrix.preset }}/WaveForge_*.bin
-            firmware/build/${{ matrix.preset }}/WaveForge.hex
+            firmware/build/${{ matrix.preset }}/ClearDMR_*.bin
+            firmware/build/${{ matrix.preset }}/ClearDMR.hex
           if-no-files-found: error
           retention-days: 30

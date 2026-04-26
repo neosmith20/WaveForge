@@ -1,8 +1,8 @@
-# WaveForge
+# ClearDMR
 
 Open source firmware for the **Baofeng DM-1701** and **TYT MD-UV380** digital radios.
 
-WaveForge is a community-driven continuation of the OpenGD77 firmware project, 
+ClearDMR is a community-driven continuation of the OpenGD77 firmware project, 
 modernized and maintained for ongoing use by amateur radio operators worldwide.
 
 ---
@@ -11,7 +11,7 @@ modernized and maintained for ongoing use by amateur radio operators worldwide.
 
 This firmware is provided **as-is** with no warranty of any kind. Flashing 
 third-party firmware to your radio is done entirely at your own risk. The 
-WaveForge contributors are not responsible for any damage to your equipment, 
+ClearDMR contributors are not responsible for any damage to your equipment, 
 unauthorized transmissions, or any regulatory violations. Always ensure you 
 are operating within the laws and license conditions of your country.
 
@@ -31,7 +31,7 @@ strictly prohibited per the original license.**
 
 ## Project Status
 
-WaveForge is in early development. Current focus:
+ClearDMR is in early development. Current focus:
 
 - [ ] Modernizing the build system (migrating from Eclipse CDT to CMake)
 - [ ] Verifying clean build on current toolchains
@@ -43,10 +43,10 @@ WaveForge is in early development. Current focus:
 
 ## Background
 
-WaveForge is based on the final release of the 
+ClearDMR is based on the final release of the 
 [OpenGD77](https://www.opengd77.com) firmware (September 2024), 
 originally developed by Roger Clark VK3KYY and contributors. 
-OpenGD77 entered archive/read-only status in 2026. WaveForge exists 
+OpenGD77 entered archive/read-only status in 2026. ClearDMR exists 
 to carry that work forward for the community.
 
 All original copyright notices are preserved in accordance with the 
@@ -67,7 +67,7 @@ discuss approach first.
 
 ## License
 
-WaveForge is released under the same terms as the original OpenGD77 
+ClearDMR is released under the same terms as the original OpenGD77 
 firmware. See [LICENSE](LICENSE) for full details.
 
 **Non-commercial use only.**
