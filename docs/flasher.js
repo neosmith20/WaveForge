@@ -77,11 +77,14 @@ const CODEC_DST_OFFSET = 0x6937C;
 // DFU_DNLOAD transfer size — 2 KB matches the STM32F405 DFU ROM default
 const BLOCK_SIZE = 2048;
 
-// GitHub Releases download URLs (populated when a release is published)
+// Firmware binaries are committed to docs/firmware/ and served same-origin from
+// GitHub Pages.  GitHub Releases download URLs go through release-assets.githubusercontent.com
+// which does not set Access-Control-Allow-Origin, making them unfetchable from
+// a browser.  Same-origin paths have no CORS involvement at all.
 const FIRMWARE_URLS = {
-  DM1701:  'https://github.com/neosmith20/ClearDMR/releases/latest/download/ClearDMR_DM1701.bin',
-  MDUV380: 'https://github.com/neosmith20/ClearDMR/releases/latest/download/ClearDMR_MDUV380.bin',
-  RT84:    'https://github.com/neosmith20/ClearDMR/releases/latest/download/ClearDMR_RT84.bin',
+  DM1701:  './firmware/ClearDMR_DM1701.bin',
+  MDUV380: './firmware/ClearDMR_MDUV380.bin',
+  RT84:    './firmware/ClearDMR_RT84.bin',
 };
 
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
@@ -246,13 +249,10 @@ async function flashFirmware(device, donorBytes, model, onProgress) {
   try {
     fwResponse = await fetch(url);
   } catch (e) {
-    throw new Error('Could not reach GitHub. Check your internet connection.');
+    throw new Error(`Could not load firmware file (${url}). ${e.message}`);
   }
   if (!fwResponse.ok) {
-    throw new Error(
-      `Firmware download failed (HTTP ${fwResponse.status}). ` +
-      'Ensure a ClearDMR release has been published on GitHub.'
-    );
+    throw new Error(`Firmware file not found (HTTP ${fwResponse.status}): ${url}`);
   }
   const firmware = new Uint8Array(await fwResponse.arrayBuffer());
   onProgress(4, 'Firmware downloaded.');

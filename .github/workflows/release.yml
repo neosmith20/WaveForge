@@ -113,3 +113,37 @@ jobs:
             --title "ClearDMR $TAG" \
             --notes-file notes.md \
             release/ClearDMR_*.bin
+
+  # ─── Commit firmware binaries to docs/firmware/ on main ───────────────────
+  # The web flasher fetches firmware as same-origin relative paths from GitHub
+  # Pages.  GitHub Releases download URLs are unusable from a browser because
+  # release-assets.githubusercontent.com does not set Access-Control-Allow-Origin.
+  deploy:
+    name: Deploy Firmware to Pages
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download all firmware binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fw-*
+          merge-multiple: true
+          path: docs/firmware/
+
+      - name: Commit and push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/firmware/
+          git diff --cached --quiet && echo "No firmware changes to commit" && exit 0
+          git commit -m "chore: update firmware binaries for ${{ github.ref_name }}"
+          git push origin main
