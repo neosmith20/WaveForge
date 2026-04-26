@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClearDMR Web Flasher</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="browser-banner" class="browser-banner hidden">
+    <strong>Unsupported browser.</strong> WebUSB requires Chrome 89+ or Microsoft Edge 89+.
+    <a href="https://www.google.com/chrome/" target="_blank" rel="noopener">Download Chrome</a>
+    &mdash; Safari and Firefox do not support WebUSB.
+  </div>
+
+  <header class="site-header">
+    <div class="container">
+      <div class="brand">
+        <span class="brand-name">ClearDMR</span>
+        <span class="brand-badge">Web Flasher</span>
+      </div>
+      <p class="brand-tagline">
+        Community firmware for Baofeng DM-1701 &bull; TYT MD-UV380 &bull; Retevis RT84
+      </p>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- Step 1: Radio model -->
+    <div class="step-card" id="card-model">
+      <div class="step-header">
+        <span class="step-number" id="step-num-1">1</span>
+        <h2>Select Your Radio</h2>
+      </div>
+      <div class="step-body">
+        <div class="radio-grid">
+          <button class="radio-btn" data-model="DM1701" type="button">
+            <strong>Baofeng DM-1701</strong>
+            <span>Dual-band DMR / FM handheld</span>
+          </button>
+          <button class="radio-btn" data-model="MDUV380" type="button">
+            <strong>TYT MD-UV380</strong>
+            <span>Dual-band DMR / FM handheld</span>
+          </button>
+          <button class="radio-btn" data-model="RT84" type="button">
+            <strong>Retevis RT84</strong>
+            <span>Dual-band DMR / FM handheld</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Donor file -->
+    <div class="step-card locked" id="card-donor">
+      <div class="step-header">
+        <span class="step-number" id="step-num-2">2</span>
+        <h2>Provide Donor Firmware</h2>
+      </div>
+      <div class="step-body">
+        <div class="info-box">
+          <h3>What is a donor file?</h3>
+          <p>
+            ClearDMR uses a vocoder &mdash; the audio codec that encodes and decodes DMR voice.
+            Due to licensing restrictions, this codec cannot be bundled with ClearDMR.
+            Instead, the flasher extracts it from your radio's <strong>original factory firmware</strong>,
+            which you already own a license to use.
+          </p>
+          <p>
+            Obtain the original firmware <code>.bin</code> for your specific radio model from the
+            manufacturer's website, then select it below. The file never leaves your browser.
+          </p>
+        </div>
+        <div class="file-picker-area" id="donor-drop-area">
+          <input type="file" id="donor-file-input" accept=".bin" hidden>
+          <button class="btn btn-outline" id="donor-pick-btn" type="button">
+            Choose donor .bin file
+          </button>
+          <p class="hint">Or drag and drop a .bin file here</p>
+          <p id="donor-file-name" class="file-selected hidden"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Connect radio -->
+    <div class="step-card locked" id="card-connect">
+      <div class="step-header">
+        <span class="step-number" id="step-num-3">3</span>
+        <h2>Connect Your Radio</h2>
+      </div>
+      <div class="step-body">
+        <div class="info-box">
+          <h3>Put your radio in flash mode first</h3>
+          <ol>
+            <li>Turn the radio <strong>off</strong>.</li>
+            <li>Hold <strong>PTT + SK1</strong> (the two buttons on the left side) while plugging in the USB cable to your computer.</li>
+            <li>The radio screen should stay <strong>blank</strong> &mdash; that confirms it is in flash mode.</li>
+          </ol>
+        </div>
+        <button class="btn btn-primary" id="connect-btn" type="button" disabled>
+          Connect Radio via USB
+        </button>
+        <p id="connect-status" class="status-text"></p>
+      </div>
+    </div>
+
+    <!-- Step 4: Flash -->
+    <div class="step-card locked" id="card-flash">
+      <div class="step-header">
+        <span class="step-number" id="step-num-4">4</span>
+        <h2>Flash Firmware</h2>
+      </div>
+      <div class="step-body">
+        <div id="flash-summary" class="summary-box hidden"></div>
+        <button class="btn btn-primary btn-flash" id="flash-btn" type="button" disabled>
+          Flash ClearDMR Firmware
+        </button>
+        <div class="progress-area hidden" id="progress-area">
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="progress-bar"></div>
+          </div>
+          <p id="progress-label" class="progress-label">0%</p>
+        </div>
+        <p id="flash-status" class="status-text"></p>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>
+        ClearDMR is open source, non-commercial firmware based on
+        <a href="https://www.opengd77.com" target="_blank" rel="noopener">OpenGD77</a>.
+        Flash at your own risk. Always ensure you are licensed and operating within
+        the regulations of your country.
+        &bull;
+        <a href="https://github.com/neosmith20/ClearDMR" target="_blank" rel="noopener">GitHub</a>
+      </p>
+    </div>
+  </footer>
+
+  <script src="flasher.js"></script>
+</body>
+</html>
