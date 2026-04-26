@@ -17,6 +17,73 @@ const DFU_FILTERS = [
   { vendorId: 0x0483, productId: 0xDF11 },
 ];
 
+// ─── DFU protocol constants ───────────────────────────────────────────────────
+
+// USB DFU 1.1 request codes
+const DFU_DNLOAD    = 1;
+const DFU_GETSTATUS = 3;
+const DFU_CLRSTATUS = 4;
+const DFU_ABORT     = 6;
+
+// DFU device state codes (bState in GETSTATUS response)
+const STATE_IDLE               = 2;
+const STATE_DNLOAD_SYNC        = 3;
+const STATE_DNBUSY             = 4;
+const STATE_DNLOAD_IDLE        = 5;
+const STATE_MANIFEST_SYNC      = 6;
+const STATE_MANIFEST           = 7;
+const STATE_MANIFEST_WAIT_RESET = 8;
+const STATE_ERROR              = 10;
+
+// Human-readable DFU error status codes for error messages
+const DFU_STATUS_NAMES = {
+  0x01: 'errTARGET', 0x02: 'errFILE',    0x03: 'errWRITE',
+  0x04: 'errERASE',  0x05: 'errCHECK_ERASED', 0x06: 'errPROG',
+  0x07: 'errVERIFY', 0x08: 'errADDRESS', 0x09: 'errNOTDONE',
+  0x0A: 'errFIRMWARE', 0x0B: 'errVENDOR', 0x0E: 'errUNKNOWN',
+};
+
+// STM32 DFU extension command bytes (sent in DFU_DNLOAD with wValue=0)
+const STM32_CMD_SET_ADDR = 0x21;
+const STM32_CMD_ERASE    = 0x41;
+
+// ─── Flash layout & codec offsets ────────────────────────────────────────────
+
+// Firmware start address — STM32F405 internal flash, immediately after the
+// 48 KB bootloader (sectors 0-2).  Matches FLASH ORIGIN in the linker script.
+const FIRMWARE_START = 0x0800C000;
+
+// STM32F405VGT6 (1 MB) sector start addresses.
+// Sectors 0-2 hold the bootloader; we erase 3-9 to cover the full
+// firmware + codec region (codec ends at 0x080BDF2C, inside sector 9).
+const SECTORS_TO_ERASE = [
+  0x0800C000,  // sector  3 — 16 KB
+  0x08010000,  // sector  4 — 64 KB
+  0x08020000,  // sector  5 — 128 KB
+  0x08040000,  // sector  6 — 128 KB
+  0x08060000,  // sector  7 — 128 KB
+  0x08080000,  // sector  8 — 128 KB
+  0x080A0000,  // sector  9 — 128 KB
+];
+
+// Codec extraction from the donor binary
+const CODEC_SRC_OFFSET = 0xC2C7C;
+const CODEC_SRC_LENGTH = 0x48BB0;
+
+// Offset inside the ClearDMR firmware image where the codec is patched in.
+// Absolute flash address: FIRMWARE_START + CODEC_DST_OFFSET = 0x0807537C
+const CODEC_DST_OFFSET = 0x6937C;
+
+// DFU_DNLOAD transfer size — 2 KB matches the STM32F405 DFU ROM default
+const BLOCK_SIZE = 2048;
+
+// GitHub Releases download URLs (populated when a release is published)
+const FIRMWARE_URLS = {
+  DM1701:  'https://github.com/neosmith20/ClearDMR/releases/latest/download/ClearDMR_DM1701.bin',
+  MDUV380: 'https://github.com/neosmith20/ClearDMR/releases/latest/download/ClearDMR_MDUV380.bin',
+  RT84:    'https://github.com/neosmith20/ClearDMR/releases/latest/download/ClearDMR_RT84.bin',
+};
+
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
 const cardModel    = document.getElementById('card-model');
 const cardDonor    = document.getElementById('card-donor');
@@ -137,11 +204,11 @@ connectBtn.addEventListener('click', async () => {
 flashBtn.addEventListener('click', async () => {
   flashBtn.disabled = true;
   progressArea.classList.remove('hidden');
-  setStatus(flashStatus, 'Preparing…', '');
+  setStatus(flashStatus, 'Starting…', '');
 
   try {
     await flashFirmware(state.device, state.donorBytes, state.model, (pct, msg) => {
-      progressBar.style.width  = `${pct}%`;
+      progressBar.style.width   = `${pct}%`;
       progressLabel.textContent = `${Math.round(pct)}%`;
       if (msg) setStatus(flashStatus, msg, '');
     });
@@ -161,8 +228,6 @@ flashBtn.addEventListener('click', async () => {
 });
 
 // ─── WebUSB: connect ──────────────────────────────────────────────────────────
-// Returns an open USBDevice in DFU mode.
-// The browser will show its own permission dialog restricted to DFU_FILTERS.
 async function connectUSB() {
   const device = await navigator.usb.requestDevice({ filters: DFU_FILTERS });
   await device.open();
@@ -173,40 +238,214 @@ async function connectUSB() {
 }
 
 // ─── WebUSB: flash ────────────────────────────────────────────────────────────
-// Placeholder implementation — reports simulated progress so the full UI flow
-// can be exercised today. Replace the body of this function with a real
-// USB DFU 1.1 / STM32 DFU extension implementation.
-//
-// Real implementation outline:
-//   1. Claim DFU interface (usually interface 0 or 1; scan descriptors)
-//   2. Issue DFU_GETSTATUS to confirm DFU_IDLE state
-//   3. Extract vocoder codec bytes from donorBytes at model-specific offsets
-//   4. Patch extracted codec into the ClearDMR firmware image
-//   5. Erase target flash sectors via STM32 DFU erase command (DFU_DNLOAD, wValue=0)
-//   6. Write firmware in <=2 KB blocks using DFU_DNLOAD (wValue = block index)
-//      — poll DFU_GETSTATUS after each block; call onProgress(pct, msg)
-//   7. Send zero-length DFU_DNLOAD to signal end-of-image
-//   8. Issue DFU_GETSTATUS until dfuMANIFEST_WAIT_RESET, then trigger reset
 async function flashFirmware(device, donorBytes, model, onProgress) {
-  // TODO: replace with real DFU protocol
-  console.log('[flasher] flashFirmware called', { model, donorSize: donorBytes?.length });
+  // 1. Fetch the firmware binary from GitHub Releases
+  onProgress(0, 'Fetching firmware from GitHub…');
+  const url = FIRMWARE_URLS[model];
+  let fwResponse;
+  try {
+    fwResponse = await fetch(url);
+  } catch (e) {
+    throw new Error('Could not reach GitHub. Check your internet connection.');
+  }
+  if (!fwResponse.ok) {
+    throw new Error(
+      `Firmware download failed (HTTP ${fwResponse.status}). ` +
+      'Ensure a ClearDMR release has been published on GitHub.'
+    );
+  }
+  const firmware = new Uint8Array(await fwResponse.arrayBuffer());
+  onProgress(4, 'Firmware downloaded.');
 
-  const stages = [
-    [0,   'Erasing flash sectors…'],
-    [15,  'Extracting codec from donor file…'],
-    [25,  'Patching firmware image…'],
-    [35,  'Writing firmware to radio…'],
-    [90,  'Finalizing…'],
-    [100, null],
-  ];
+  // 2. Validate donor file size before extracting
+  const requiredDonorSize = CODEC_SRC_OFFSET + CODEC_SRC_LENGTH;
+  if (donorBytes.length < requiredDonorSize) {
+    throw new Error(
+      `Donor file is too small (${formatBytes(donorBytes.length)}). ` +
+      `Expected at least ${formatBytes(requiredDonorSize)}.`
+    );
+  }
 
-  for (const [pct, msg] of stages) {
-    await delay(pct === 35 ? 1800 : 600);
-    onProgress(pct, msg);
+  // 3. Extract codec from donor and patch it into the firmware image
+  onProgress(5, 'Extracting codec from donor file…');
+  const codec = donorBytes.slice(CODEC_SRC_OFFSET, CODEC_SRC_OFFSET + CODEC_SRC_LENGTH);
+
+  const requiredFwSize = CODEC_DST_OFFSET + CODEC_SRC_LENGTH;
+  if (firmware.length < requiredFwSize) {
+    throw new Error(
+      `Firmware image is too small to accept the codec patch ` +
+      `(got ${formatBytes(firmware.length)}, need ${formatBytes(requiredFwSize)}).`
+    );
+  }
+  firmware.set(codec, CODEC_DST_OFFSET);
+  onProgress(8, 'Codec patched into firmware image.');
+
+  // 4. Find the DFU interface and claim it
+  onProgress(9, 'Claiming DFU interface…');
+  const ifNum = findDfuInterface(device);
+  if (ifNum === null) {
+    throw new Error('No DFU interface found on the connected device.');
+  }
+  await device.claimInterface(ifNum);
+
+  // 5. Ensure the device is in dfuIDLE — clear any stale error or operation
+  let st = await dfuGetStatus(device, ifNum);
+  if (st.bState === STATE_ERROR) {
+    await dfuOut(device, ifNum, DFU_CLRSTATUS, 0);
+    st = await dfuGetStatus(device, ifNum);
+  }
+  if (st.bState !== STATE_IDLE && st.bState !== STATE_DNLOAD_IDLE) {
+    await dfuOut(device, ifNum, DFU_ABORT, 0);
+    st = await dfuGetStatus(device, ifNum);
+  }
+  if (st.bState !== STATE_IDLE) {
+    throw new Error(`Device is not ready (state ${st.bState}). Try reconnecting the radio.`);
+  }
+
+  // 6. Erase flash sectors 3-9 (covers FIRMWARE_START through codec end)
+  for (let i = 0; i < SECTORS_TO_ERASE.length; i++) {
+    const pct = 10 + (i / SECTORS_TO_ERASE.length) * 30;
+    onProgress(pct, `Erasing sector ${i + 1} of ${SECTORS_TO_ERASE.length}…`);
+    await dfuErasesector(device, ifNum, SECTORS_TO_ERASE[i]);
+  }
+
+  // 7. Set the write address pointer to the start of firmware flash
+  onProgress(41, 'Setting write address…');
+  await dfuSetAddress(device, ifNum, FIRMWARE_START);
+
+  // 8. Write firmware in 2 KB blocks
+  const totalBlocks = Math.ceil(firmware.length / BLOCK_SIZE);
+  for (let block = 0; block < totalBlocks; block++) {
+    const pct = 43 + (block / totalBlocks) * 50;
+    onProgress(pct, `Writing block ${block + 1} of ${totalBlocks}…`);
+
+    const offset = block * BLOCK_SIZE;
+    const chunk  = firmware.slice(offset, Math.min(offset + BLOCK_SIZE, firmware.length));
+
+    // wValue = block index + 2 (STM32 DFU convention: 0/1 are reserved for
+    // special commands; data blocks start at wValue=2)
+    await dfuOut(device, ifNum, DFU_DNLOAD, block + 2, chunk);
+    await dfuPoll(device, ifNum, STATE_DNLOAD_IDLE);
+  }
+
+  // 9. Zero-length DFU_DNLOAD signals end-of-image → triggers manifest
+  onProgress(94, 'Sending manifest command…');
+  await dfuOut(device, ifNum, DFU_DNLOAD, totalBlocks + 2, new Uint8Array(0));
+
+  // 10. Poll through manifest states; device will self-reset when done.
+  // A USB disconnect error here is normal and treated as success.
+  try {
+    await dfuPoll(device, ifNum, STATE_MANIFEST_WAIT_RESET);
+  } catch (e) {
+    const msg = e.message || '';
+    const isDisconnect =
+      msg.includes('disconnected') ||
+      msg.includes('network changed') ||
+      msg.includes('No device selected') ||
+      e.name === 'NetworkError';
+    if (!isDisconnect) throw e;
+    // Device reset itself — this is the expected success path
+  }
+
+  onProgress(100, null);
+}
+
+// ─── DFU helper functions ─────────────────────────────────────────────────────
+
+// Scan the USB configuration for the first DFU-class interface and return its
+// interface number, or null if none is found.
+function findDfuInterface(device) {
+  for (const iface of device.configuration.interfaces) {
+    for (const alt of iface.alternates) {
+      if (alt.interfaceClass === 0xFE && alt.interfaceSubclass === 0x01) {
+        return iface.interfaceNumber;
+      }
+    }
+  }
+  return null;
+}
+
+// Issue a class OUT request to the DFU interface with no data body.
+async function dfuOut(device, ifNum, request, value, data) {
+  const result = await device.controlTransferOut(
+    { requestType: 'class', recipient: 'interface', request, value, index: ifNum },
+    data instanceof Uint8Array ? data : new Uint8Array(0)
+  );
+  if (result.status !== 'ok') {
+    throw new Error(`DFU request 0x${request.toString(16)} failed: ${result.status}`);
   }
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// Issue DFU_GETSTATUS and return the parsed 6-byte response.
+async function dfuGetStatus(device, ifNum) {
+  const result = await device.controlTransferIn(
+    { requestType: 'class', recipient: 'interface', request: DFU_GETSTATUS, value: 0, index: ifNum },
+    6
+  );
+  if (result.status !== 'ok') {
+    throw new Error(`DFU_GETSTATUS failed: ${result.status}`);
+  }
+  const d = new Uint8Array(result.data.buffer);
+  return {
+    bStatus:        d[0],
+    bwPollTimeout:  d[1] | (d[2] << 8) | (d[3] << 16),
+    bState:         d[4],
+  };
+}
+
+// Poll DFU_GETSTATUS until a stable/idle state is reached, respecting the
+// device's requested poll timeout between BUSY or MANIFEST transitions.
+async function dfuPoll(device, ifNum, targetState) {
+  for (;;) {
+    const st = await dfuGetStatus(device, ifNum);
+
+    if (st.bStatus !== 0x00) {
+      const name = DFU_STATUS_NAMES[st.bStatus] || `0x${st.bStatus.toString(16)}`;
+      throw new Error(`DFU device error: ${name}`);
+    }
+    if (st.bState === STATE_ERROR) {
+      throw new Error('DFU device entered error state.');
+    }
+    if (st.bState === targetState) {
+      return st;
+    }
+
+    // Busy or manifesting — wait the device-specified timeout before polling again
+    if (st.bState === STATE_DNBUSY || st.bState === STATE_MANIFEST) {
+      await delay(Math.max(st.bwPollTimeout, 10));
+    }
+    // STATE_DNLOAD_SYNC and STATE_MANIFEST_SYNC fall through immediately to re-poll
+  }
+}
+
+// Send the STM32 DFU "Erase Sector" special command for the sector that
+// contains the given address, then poll until the erase completes.
+async function dfuErasesector(device, ifNum, addr) {
+  const cmd = new Uint8Array(5);
+  cmd[0] = STM32_CMD_ERASE;
+  cmd[1] = (addr >>>  0) & 0xFF;
+  cmd[2] = (addr >>>  8) & 0xFF;
+  cmd[3] = (addr >>> 16) & 0xFF;
+  cmd[4] = (addr >>> 24) & 0xFF;
+  await dfuOut(device, ifNum, DFU_DNLOAD, 0, cmd);
+  await dfuPoll(device, ifNum, STATE_DNLOAD_IDLE);
+}
+
+// Send the STM32 DFU "Set Address Pointer" special command, then poll until
+// the device acknowledges it.  All subsequent data blocks are written relative
+// to this base address.
+async function dfuSetAddress(device, ifNum, addr) {
+  const cmd = new Uint8Array(5);
+  cmd[0] = STM32_CMD_SET_ADDR;
+  cmd[1] = (addr >>>  0) & 0xFF;
+  cmd[2] = (addr >>>  8) & 0xFF;
+  cmd[3] = (addr >>> 16) & 0xFF;
+  cmd[4] = (addr >>> 24) & 0xFF;
+  await dfuOut(device, ifNum, DFU_DNLOAD, 0, cmd);
+  await dfuPoll(device, ifNum, STATE_DNLOAD_IDLE);
+}
+
+// ─── UI helpers ───────────────────────────────────────────────────────────────
 function unlock(card) {
   card.classList.remove('locked');
 }
