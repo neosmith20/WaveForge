@@ -85,6 +85,30 @@
       </div>
     </div>
 
+    <!-- Windows driver notice (injected before step 3 on Windows only) -->
+    <div class="notice-card hidden" id="card-windows-driver">
+      <div class="notice-header">
+        <span class="notice-icon">&#9881;</span>
+        <h2>Windows: One-Time Driver Setup</h2>
+      </div>
+      <div class="notice-body">
+        <p>
+          Windows ships with a default STM32 DFU driver that blocks WebUSB access.
+          You need to swap it for <strong>WinUSB</strong> using a free tool called
+          <a href="https://zadig.akeo.ie" target="_blank" rel="noopener">Zadig</a>.
+          This is a one-time step &mdash; future flashes will work without repeating it.
+        </p>
+        <ol>
+          <li>Put your radio into DFU mode using the instructions in Step 3 below, then come back here.</li>
+          <li>Download and run <a href="https://zadig.akeo.ie" target="_blank" rel="noopener">Zadig</a>.</li>
+          <li>In Zadig, click <strong>Options &rarr; List All Devices</strong>.</li>
+          <li>Select <strong>STM32 BOOTLOADER</strong> from the device dropdown.</li>
+          <li>Make sure the driver on the right side is set to <strong>WinUSB</strong>, then click <strong>Replace Driver</strong>.</li>
+          <li>Once the driver installs, return here and click Connect in Step 3.</li>
+        </ol>
+      </div>
+    </div>
+
     <!-- Step 3: Connect radio -->
     <div class="step-card locked" id="card-connect">
       <div class="step-header">

@@ -242,5 +242,15 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// ─── Windows driver notice ────────────────────────────────────────────────────
+function checkWindows() {
+  const platform = navigator.userAgentData?.platform ?? navigator.platform ?? '';
+  const isWindows = /win/i.test(platform);
+  if (isWindows) {
+    document.getElementById('card-windows-driver').classList.remove('hidden');
+  }
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 checkBrowser();
+checkWindows();

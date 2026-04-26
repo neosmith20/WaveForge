@@ -109,6 +109,64 @@ main.container {
   flex: 1;
 }
 
+/* ─── Windows driver notice ───────────────────────────────────────────────── */
+.notice-card {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-left: 4px solid #d97706;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.notice-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid #fde68a;
+  background: #fef3c7;
+}
+
+.notice-icon {
+  font-size: 1.2rem;
+  color: #d97706;
+  flex-shrink: 0;
+}
+
+.notice-header h2 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #92400e;
+}
+
+.notice-body {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.notice-body p {
+  font-size: 0.875rem;
+  color: #78350f;
+  line-height: 1.65;
+}
+
+.notice-body ol {
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 0.875rem;
+  color: #78350f;
+  line-height: 1.65;
+}
+
+.notice-body strong { color: #92400e; font-weight: 600; }
+.notice-body a { color: #92400e; font-weight: 600; }
+.notice-body a:hover { color: #78350f; }
+
 /* ─── Step cards ──────────────────────────────────────────────────────────── */
 .step-card {
   background: var(--surface);
