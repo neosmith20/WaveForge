@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  # ─── Build all 8 firmware variants in parallel ─────────────────────────────
+  build:
+    name: ${{ matrix.preset }}
+    runs-on: ubuntu-latest
+    # All 8 builds must succeed; if any fail we do not publish a partial release.
+    strategy:
+      fail-fast: true
+      matrix:
+        preset:
+          - mduv380
+          - mduv380-10w
+          - mduv380-ja
+          - mduv380-10w-ja
+          - dm1701
+          - dm1701-ja
+          - rt84
+          - rt84-ja
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            gcc-arm-none-eabi libnewlib-arm-none-eabi cmake
+
+      - name: Configure
+        working-directory: firmware
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        working-directory: firmware
+        run: cmake --build --preset ${{ matrix.preset }} -j$(nproc)
+
+      - name: Upload firmware binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: fw-${{ matrix.preset }}
+          # Upload only the distribution binary (codec_cleaner output).
+          # The raw .bin/.hex are intentionally excluded from releases.
+          path: firmware/build/${{ matrix.preset }}/ClearDMR_*.bin
+          if-no-files-found: error
+          retention-days: 1
+
+  # ─── Collect binaries and publish the GitHub Release ───────────────────────
+  publish:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all firmware binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fw-*
+          merge-multiple: true
+          path: release/
+
+      - name: Verify all 8 binaries are present
+        run: |
+          echo "Release assets:"
+          ls -lh release/ClearDMR_*.bin
+          count=$(ls release/ClearDMR_*.bin | wc -l)
+          if [ "$count" -ne 8 ]; then
+            echo "ERROR: expected 8 firmware binaries, found $count"
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat > notes.md << 'EOF'
+          ## Firmware Variants
+
+          | File | Radio |
+          |------|-------|
+          | `ClearDMR_DM1701.bin` | Baofeng DM-1701 |
+          | `ClearDMR_DM1701_Japanese.bin` | Baofeng DM-1701 (Japanese) |
+          | `ClearDMR_MDUV380.bin` | TYT MD-UV380 |
+          | `ClearDMR_MDUV380_Japanese.bin` | TYT MD-UV380 (Japanese) |
+          | `ClearDMR_MDUV380_10W_PLUS.bin` | TYT MD-UV380 10W+ |
+          | `ClearDMR_MDUV380_10W_PLUS_Japanese.bin` | TYT MD-UV380 10W+ (Japanese) |
+          | `ClearDMR_RT84.bin` | Retevis RT84 |
+          | `ClearDMR_RT84_Japanese.bin` | Retevis RT84 (Japanese) |
+
+          ## Flashing
+
+          Use the [ClearDMR Web Flasher](https://neosmith20.github.io/ClearDMR/) to flash directly from your browser (Chrome or Edge required). You will need the original factory firmware for your radio as a donor file.
+
+          ## Notes
+
+          - Do not flash `_Japanese` variants unless your radio is the Japanese market edition.
+          - The `_10W_PLUS` variant is only for MD-UV380 units with the high-power hardware modification.
+          - Flash at your own risk. Always ensure you are licensed and operating within the regulations of your country.
+          EOF
+
+          gh release create "$TAG" \
+            --title "ClearDMR $TAG" \
+            --notes-file notes.md \
+            release/ClearDMR_*.bin
