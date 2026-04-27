@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Setup Guide — ClearDMR</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="site-header">
+    <div class="container">
+      <div class="brand">
+        <span class="brand-name">ClearDMR</span>
+        <span class="brand-badge">Setup Guide</span>
+      </div>
+      <p class="brand-tagline">
+        Community firmware for Baofeng DM-1701 &bull; TYT MD-UV380 &bull; Retevis RT84
+      </p>
+    </div>
+  </header>
+
+  <nav class="site-nav">
+    <div class="container">
+      <ul class="nav-links">
+        <li><a href="index.html" class="nav-link">Flash</a></li>
+        <li><a href="setup.html" class="nav-link active">Setup Guide</a></li>
+        <li><a href="about.html" class="nav-link">About</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="container guide-main">
+
+    <div class="guide-intro">
+      <h1>Post-Flash Setup Guide</h1>
+      <p>After flashing ClearDMR, follow these steps to get your radio configured and on the air.</p>
+    </div>
+
+    <!-- 1. First boot -->
+    <div class="step-card guide-card">
+      <div class="step-header">
+        <span class="step-number">1</span>
+        <h2>First Boot</h2>
+      </div>
+      <div class="step-body">
+        <p>
+          Unplug the USB cable, then power on your radio normally. You should see the
+          <strong>ClearDMR splash screen</strong>, followed by the main channel display.
+        </p>
+        <p>
+          FM operation works immediately &mdash; you can scan and receive FM channels straight away.
+          DMR operation requires additional setup covered in the steps below.
+        </p>
+        <div class="guide-tip">
+          If the radio does not boot or shows an error screen, re-enter DFU mode and
+          reflash using the <a href="index.html">Web Flasher</a>.
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Backup -->
+    <div class="step-card guide-card">
+      <div class="step-header">
+        <span class="step-number">2</span>
+        <h2>Back Up Your Firmware</h2>
+      </div>
+      <div class="step-body">
+        <p>
+          Before making any changes, save a copy of the current firmware so you can restore it
+          if something goes wrong later.
+        </p>
+        <h3>How to back up</h3>
+        <ol>
+          <li>Put your radio into DFU mode (hold PTT + SK1, then press power).</li>
+          <li>Open the <a href="index.html">Web Flasher</a> and complete Steps 1&ndash;3 (select radio, donor file, connect).</li>
+          <li>The <strong>Back Up Current Firmware</strong> card will unlock &mdash; click <strong>Read &amp; Download Backup</strong>.</li>
+          <li>Save the downloaded <code>.bin</code> file somewhere safe.</li>
+        </ol>
+        <p>
+          To restore from a backup, flash the saved <code>.bin</code> file as though it were a
+          normal firmware image using the flasher.
+        </p>
+      </div>
+    </div>
+
+    <!-- 3. DMR ID -->
+    <div class="step-card guide-card">
+      <div class="step-header">
+        <span class="step-number">3</span>
+        <h2>Get Your DMR ID</h2>
+      </div>
+      <div class="step-body">
+        <p>
+          Every DMR operator needs a unique numeric ID. This is a 7-digit number assigned to your
+          callsign and used to identify you on DMR networks worldwide.
+        </p>
+        <h3>How to register</h3>
+        <ol>
+          <li>
+            Visit <a href="https://radioid.net" target="_blank" rel="noopener">radioid.net</a>
+            and create an account using your licensed amateur radio callsign.
+          </li>
+          <li>Submit the registration form. Approval typically takes <strong>24&ndash;48 hours</strong>.</li>
+          <li>Once approved, your DMR ID will appear in your account dashboard. Note it down.</li>
+        </ol>
+        <div class="guide-tip">
+          You must hold a valid amateur radio licence to register and operate on DMR networks.
+          Check your country&rsquo;s regulations before transmitting.
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. CPS -->
+    <div class="step-card guide-card">
+      <div class="step-header">
+        <span class="step-number">4</span>
+        <h2>Install a Codeplug Editor (CPS)</h2>
+      </div>
+      <div class="step-body">
+        <p>
+          A <strong>codeplug</strong> is the configuration file stored on your radio. It holds
+          your callsign, DMR ID, channels, talkgroups, and zones. You edit it with a
+          <strong>Codeplug Programming Software (CPS)</strong> tool on your computer.
+        </p>
+        <p>
+          ClearDMR is based on OpenGD77 and is compatible with the
+          <strong>OpenGD77 CPS</strong>.
+          Download it from the
+          <a href="https://github.com/rogerclarkmelbourne/OpenGD77/releases" target="_blank" rel="noopener">
+            OpenGD77 releases page
+          </a>
+          (Windows and macOS builds are available).
+        </p>
+        <h3>Read your codeplug</h3>
+        <ol>
+          <li>Connect your radio via USB with the radio powered on normally (not DFU mode).</li>
+          <li>Open the CPS and choose <strong>Radio &rarr; Read from Radio</strong>.</li>
+          <li>Save the read codeplug as a backup before making any changes.</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- 5. Callsign & DMR ID -->
+    <div class="step-card guide-card">
+      <div class="step-header">
+        <span class="step-number">5</span>
+        <h2>Enter Your Callsign &amp; DMR ID</h2>
+      </div>
+      <div class="step-body">
+        <p>
+          Your callsign and DMR ID need to be programmed into the radio so that other operators
+          can identify you on digital voice calls.
+        </p>
+        <h3>In the CPS</h3>
+        <ol>
+          <li>Open your codeplug in the CPS.</li>
+          <li>Go to <strong>General Settings</strong>.</li>
+          <li>
+            Enter your <strong>callsign</strong> in the <em>Callsign</em> field and your
+            <strong>7-digit DMR ID</strong> in the <em>DMR ID</em> field.
+          </li>
+          <li>Write the updated codeplug back to the radio via <strong>Radio &rarr; Write to Radio</strong>.</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- 6. Callsign database -->
+    <div class="step-card guide-card">
+      <div class="step-header">
+        <span class="step-number">6</span>
+        <h2>Load the Callsign Database</h2>
+      </div>
+      <div class="step-body">
+        <p>
+          ClearDMR can display the name and callsign of incoming callers on the radio screen.
+          This requires loading a callsign database, which maps DMR IDs to names.
+        </p>
+        <h3>How to load it</h3>
+        <ol>
+          <li>
+            Download the <strong>Full DMR ID Database</strong> from
+            <a href="https://radioid.net/database/download" target="_blank" rel="noopener">radioid.net/database/download</a>.
+            The file is named <code>user.bin</code> or similar.
+          </li>
+          <li>In the CPS, go to <strong>Extras &rarr; Install DMR IDs Database</strong>.</li>
+          <li>Select the downloaded file and write it to the radio.</li>
+        </ol>
+        <p>
+          The database is large (300,000+ entries). Repeat this step periodically to keep it current.
+        </p>
+      </div>
+    </div>
+
+    <!-- 7. Channels -->
+    <div class="step-card guide-card">
+      <div class="step-header">
+        <span class="step-number">7</span>
+        <h2>Create Channels</h2>
+      </div>
+      <div class="step-body">
+        <p>
+          A <strong>channel</strong> defines a frequency, mode (DMR or FM), and for DMR channels,
+          which talkgroup to use. You need at least one channel per repeater or simplex frequency
+          you want to use.
+        </p>
+        <h3>DMR channel settings</h3>
+        <ul>
+          <li><strong>Frequency:</strong> the repeater&rsquo;s output (RX) and input (TX) frequencies.</li>
+          <li><strong>Color Code (CC):</strong> a 0&ndash;15 value set by the repeater operator. Must match exactly.</li>
+          <li><strong>Time Slot (TS):</strong> 1 or 2. DMR splits each channel into two logical slots.</li>
+          <li><strong>Contact / Talkgroup:</strong> which talkgroup this channel defaults to.</li>
+        </ul>
+        <div class="guide-tip">
+          Get your local repeater&rsquo;s frequency, color code, and time slot assignments from your
+          regional amateur radio club or a repeater directory such as
+          <a href="https://www.repeaterbook.com" target="_blank" rel="noopener">RepeaterBook</a>.
+        </div>
+      </div>
+    </div>
+
+    <!-- 8. Talkgroups & zones -->
+    <div class="step-card guide-card">
+      <div class="step-header">
+        <span class="step-number">8</span>
+        <h2>Talkgroups &amp; Zones</h2>
+      </div>
+      <div class="step-body">
+        <p>
+          <strong>Talkgroups</strong> are logical groups that route DMR calls across a network.
+          Common examples: TG 91 (Worldwide), TG 235 (UK), TG 505 (Australia).
+          Your local repeater&rsquo;s administrator will tell you which talkgroups it carries.
+        </p>
+        <h3>Adding talkgroups</h3>
+        <ol>
+          <li>In the CPS, open <strong>Digital Contacts</strong>.</li>
+          <li>Add each talkgroup as a new contact: set the name, call type to <em>Group Call</em>,
+              and the DMR ID to the talkgroup number.</li>
+          <li>Assign contacts to channels as the default contact.</li>
+        </ol>
+        <h3>Organising with zones</h3>
+        <p>
+          <strong>Zones</strong> group related channels for easy navigation on the radio.
+          A common approach is one zone per repeater site, containing all the talkgroup channels
+          for that site.
+        </p>
+        <ol>
+          <li>In the CPS, open <strong>Zones</strong> and create a new zone.</li>
+          <li>Add the relevant channels to the zone.</li>
+          <li>Write the codeplug back to the radio.</li>
+        </ol>
+        <div class="guide-tip">
+          Many amateur radio clubs publish ready-made codeplugs for their local repeaters.
+          Importing one is often the fastest way to get on the air.
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>
+        ClearDMR is open source, non-commercial firmware based on
+        <a href="https://www.opengd77.com" target="_blank" rel="noopener">OpenGD77</a>.
+        Always ensure you are licensed and operating within the regulations of your country.
+        &bull;
+        <a href="https://github.com/neosmith20/ClearDMR" target="_blank" rel="noopener">GitHub</a>
+      </p>
+    </div>
+  </footer>
+
+</body>
+</html>

@@ -479,3 +479,179 @@ main.container {
 
 .site-footer a { color: #94a3b8; }
 .site-footer a:hover { color: #e2e8f0; }
+
+/* ─── Site navigation ─────────────────────────────────────────────────────── */
+.site-nav {
+  background: #162035;
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  flex-shrink: 0;
+}
+
+.nav-links {
+  display: flex;
+  list-style: none;
+}
+
+.nav-link {
+  display: block;
+  padding: 11px 18px;
+  color: #94a3b8;
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.nav-link:hover {
+  color: #e2e8f0;
+  background: rgba(255,255,255,.05);
+  border-bottom-color: #475569;
+}
+
+.nav-link.active {
+  color: #fff;
+  border-bottom-color: var(--blue);
+}
+
+/* ─── Optional-step badge ─────────────────────────────────────────────────── */
+.opt-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px;
+  background: #0891b2;
+  color: #fff;
+  border-radius: 100px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+#card-backup.complete .opt-badge { background: var(--green); }
+#card-backup.locked   .opt-badge { background: var(--locked-text); }
+
+/* ─── Setup guide & About pages ───────────────────────────────────────────── */
+.guide-main {
+  padding-top: 36px;
+  padding-bottom: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+}
+
+.guide-intro {
+  margin-bottom: 4px;
+}
+
+.guide-intro h1 {
+  font-size: 1.55rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.guide-intro p {
+  font-size: 0.925rem;
+  color: var(--muted);
+}
+
+/* Guide cards reuse step-card structure; override header bg for variety */
+.guide-card { }
+
+.guide-card .step-header { background: #fafbfd; }
+
+.guide-card .step-body p {
+  font-size: 0.875rem;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.guide-card .step-body h3 {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text);
+}
+
+.guide-card .step-body ol,
+.guide-card .step-body ul {
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.875rem;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.guide-card .step-body li strong { color: var(--text); }
+
+.guide-card .step-body code {
+  background: var(--border);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-family: 'Menlo', 'Consolas', monospace;
+}
+
+.guide-tip {
+  background: var(--blue-tint);
+  border: 1px solid #bfdbfe;
+  border-left: 4px solid var(--blue);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 0.85rem;
+  color: #1e40af;
+  line-height: 1.6;
+}
+
+/* About page */
+.about-main {
+  padding-top: 36px;
+  padding-bottom: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+}
+
+.about-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.about-section h2 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.about-section p {
+  font-size: 0.875rem;
+  color: var(--muted);
+  line-height: 1.75;
+}
+
+.about-section ul {
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.875rem;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.about-section strong { color: var(--text); font-weight: 600; }

@@ -21,19 +21,21 @@ const DFU_FILTERS = [
 
 // USB DFU 1.1 request codes
 const DFU_DNLOAD    = 1;
+const DFU_UPLOAD    = 2;
 const DFU_GETSTATUS = 3;
 const DFU_CLRSTATUS = 4;
 const DFU_ABORT     = 6;
 
 // DFU device state codes (bState in GETSTATUS response)
-const STATE_IDLE               = 2;
-const STATE_DNLOAD_SYNC        = 3;
-const STATE_DNBUSY             = 4;
-const STATE_DNLOAD_IDLE        = 5;
-const STATE_MANIFEST_SYNC      = 6;
-const STATE_MANIFEST           = 7;
+const STATE_IDLE                = 2;
+const STATE_DNLOAD_SYNC         = 3;
+const STATE_DNBUSY              = 4;
+const STATE_DNLOAD_IDLE         = 5;
+const STATE_MANIFEST_SYNC       = 6;
+const STATE_MANIFEST            = 7;
 const STATE_MANIFEST_WAIT_RESET = 8;
-const STATE_ERROR              = 10;
+const STATE_UPLOAD_IDLE         = 9;
+const STATE_ERROR               = 10;
 
 // Human-readable DFU error status codes for error messages
 const DFU_STATUS_NAMES = {
@@ -74,8 +76,12 @@ const CODEC_SRC_LENGTH = 0x48BB0;
 // Absolute flash address: FIRMWARE_START + CODEC_DST_OFFSET = 0x0807537C
 const CODEC_DST_OFFSET = 0x6937C;
 
-// DFU_DNLOAD transfer size — 2 KB matches the STM32F405 DFU ROM default
+// DFU_DNLOAD / DFU_UPLOAD transfer size — 2 KB matches the STM32F405 DFU ROM default
 const BLOCK_SIZE = 2048;
+
+// Number of 2 KB blocks to read during backup (covers the full firmware region).
+// 400 blocks = 819,200 bytes — larger than the biggest variant (~806 KB).
+const BACKUP_BLOCKS = 400;
 
 // Firmware binaries are committed to docs/firmware/ and served same-origin from
 // GitHub Pages.  GitHub Releases download URLs go through release-assets.githubusercontent.com
@@ -101,6 +107,13 @@ const donorFileName  = document.getElementById('donor-file-name');
 
 const connectBtn    = document.getElementById('connect-btn');
 const connectStatus = document.getElementById('connect-status');
+
+const cardBackup       = document.getElementById('card-backup');
+const backupBtn        = document.getElementById('backup-btn');
+const backupProgressArea = document.getElementById('backup-progress-area');
+const backupProgressBar  = document.getElementById('backup-progress-bar');
+const backupProgressLabel = document.getElementById('backup-progress-label');
+const backupStatus     = document.getElementById('backup-status');
 
 const flashSummary  = document.getElementById('flash-summary');
 const flashBtn      = document.getElementById('flash-btn');
@@ -190,6 +203,8 @@ connectBtn.addEventListener('click', async () => {
     const name = state.device.productName || 'Radio in flash mode';
     setStatus(connectStatus, `Connected: ${name}`, 'success');
     markComplete(cardConnect, 'step-num-3');
+    unlock(cardBackup);
+    backupBtn.disabled = false;
     unlock(cardFlash);
     flashBtn.disabled = false;
     updateFlashSummary();
@@ -227,6 +242,30 @@ flashBtn.addEventListener('click', async () => {
   } catch (err) {
     setStatus(flashStatus, `Flash failed: ${err.message}`, 'error');
     flashBtn.disabled = false;
+  }
+});
+
+// ─── Backup button ────────────────────────────────────────────────────────────
+backupBtn.addEventListener('click', async () => {
+  backupBtn.disabled = true;
+  backupProgressArea.classList.remove('hidden');
+  setStatus(backupStatus, 'Starting backup…', '');
+
+  try {
+    const data = await backupFirmware(state.device, (pct, msg) => {
+      backupProgressBar.style.width    = `${pct}%`;
+      backupProgressLabel.textContent  = `${Math.round(pct)}%`;
+      if (msg) setStatus(backupStatus, msg, '');
+    });
+
+    downloadBackup(data);
+    backupProgressBar.style.width   = '100%';
+    backupProgressLabel.textContent = '100%';
+    setStatus(backupStatus, `Backup saved — ${formatBytes(data.length)}.`, 'success');
+    markComplete(cardBackup, 'backup-badge');
+  } catch (err) {
+    setStatus(backupStatus, `Backup failed: ${err.message}`, 'error');
+    backupBtn.disabled = false;
   }
 });
 
@@ -443,6 +482,95 @@ async function dfuSetAddress(device, ifNum, addr) {
   cmd[4] = (addr >>> 24) & 0xFF;
   await dfuOut(device, ifNum, DFU_DNLOAD, 0, cmd);
   await dfuPoll(device, ifNum, STATE_DNLOAD_IDLE);
+}
+
+// ─── WebUSB: backup ───────────────────────────────────────────────────────────
+
+// Read BACKUP_BLOCKS * BLOCK_SIZE bytes from FIRMWARE_START via DFU_UPLOAD and
+// return them as a single Uint8Array.  The interface is claimed at entry and
+// always released (even on error) so the subsequent flash step can claim it.
+async function backupFirmware(device, onProgress) {
+  const ifNum = findDfuInterface(device);
+  if (ifNum === null) throw new Error('No DFU interface found on the connected device.');
+
+  await device.claimInterface(ifNum);
+  try {
+    // Clear any stale DFU state before reading
+    let st = await dfuGetStatus(device, ifNum);
+    if (st.bState === STATE_ERROR) {
+      await dfuOut(device, ifNum, DFU_CLRSTATUS, 0);
+      st = await dfuGetStatus(device, ifNum);
+    }
+    if (st.bState !== STATE_IDLE) {
+      await dfuOut(device, ifNum, DFU_ABORT, 0);
+      st = await dfuGetStatus(device, ifNum);
+    }
+
+    // Set the address pointer to the firmware start, then abort back to
+    // dfuIDLE — SET_ADDR leaves the device in dfuDNLOAD-IDLE, and DFU_UPLOAD
+    // requires dfuIDLE.  The address pointer register survives the ABORT.
+    onProgress(0, 'Setting read address…');
+    await dfuSetAddress(device, ifNum, FIRMWARE_START);
+    await dfuOut(device, ifNum, DFU_ABORT, 0);
+
+    st = await dfuGetStatus(device, ifNum);
+    if (st.bState !== STATE_IDLE) {
+      throw new Error(`Device not ready for upload (state ${st.bState}).`);
+    }
+
+    // Read blocks with DFU_UPLOAD.  wValue starts at 2 (STM32 DFU convention;
+    // 0 and 1 are reserved for special responses).
+    const chunks = [];
+    for (let block = 0; block < BACKUP_BLOCKS; block++) {
+      const pct = (block / BACKUP_BLOCKS) * 100;
+      if (block % 20 === 0) {
+        onProgress(pct, `Reading block ${block + 1} of ${BACKUP_BLOCKS}…`);
+      }
+
+      const result = await device.controlTransferIn({
+        requestType: 'class',
+        recipient:   'interface',
+        request:     DFU_UPLOAD,
+        value:       block + 2,
+        index:       ifNum,
+      }, BLOCK_SIZE);
+
+      if (result.status !== 'ok') {
+        throw new Error(`DFU_UPLOAD failed at block ${block}: ${result.status}`);
+      }
+
+      const chunk = new Uint8Array(result.data.buffer);
+      chunks.push(chunk);
+      if (chunk.length < BLOCK_SIZE) break; // end of readable flash region
+    }
+
+    // Abort from dfuUPLOAD-IDLE back to dfuIDLE so the device is clean for
+    // the flash step.
+    await dfuOut(device, ifNum, DFU_ABORT, 0);
+
+    const totalBytes = chunks.reduce((sum, c) => sum + c.length, 0);
+    const backup = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) { backup.set(chunk, offset); offset += chunk.length; }
+    return backup;
+
+  } finally {
+    try { await device.releaseInterface(ifNum); } catch (_) {}
+  }
+}
+
+function downloadBackup(data) {
+  const date  = new Date().toISOString().slice(0, 10);
+  const model = state.model || 'radio';
+  const blob  = new Blob([data], { type: 'application/octet-stream' });
+  const url   = URL.createObjectURL(blob);
+  const a     = document.createElement('a');
+  a.href     = url;
+  a.download = `ClearDMR_backup_${model}_${date}.bin`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // ─── UI helpers ───────────────────────────────────────────────────────────────

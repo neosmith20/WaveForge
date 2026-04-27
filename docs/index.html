@@ -26,6 +26,16 @@
     </div>
   </header>
 
+  <nav class="site-nav">
+    <div class="container">
+      <ul class="nav-links">
+        <li><a href="index.html" class="nav-link active">Flash</a></li>
+        <li><a href="setup.html" class="nav-link">Setup Guide</a></li>
+        <li><a href="about.html" class="nav-link">About</a></li>
+      </ul>
+    </div>
+  </nav>
+
   <main class="container">
 
     <!-- Step 1: Radio model -->
@@ -130,6 +140,34 @@
           Connect Radio via USB
         </button>
         <p id="connect-status" class="status-text"></p>
+      </div>
+    </div>
+
+    <!-- Backup — optional, unlocked after connect -->
+    <div class="step-card locked" id="card-backup">
+      <div class="step-header">
+        <span class="opt-badge" id="backup-badge">Optional</span>
+        <h2>Back Up Current Firmware</h2>
+      </div>
+      <div class="step-body">
+        <div class="info-box">
+          <h3>Recommended before your first flash</h3>
+          <p>
+            This reads your radio's current firmware over USB and saves it as a .bin file.
+            If you ever need to restore the original firmware, you can flash this backup
+            straight back using this tool.
+          </p>
+        </div>
+        <button class="btn btn-outline" id="backup-btn" type="button" disabled>
+          Read &amp; Download Backup
+        </button>
+        <div class="progress-area hidden" id="backup-progress-area">
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="backup-progress-bar"></div>
+          </div>
+          <p id="backup-progress-label" class="progress-label">0%</p>
+        </div>
+        <p id="backup-status" class="status-text"></p>
       </div>
     </div>
 
