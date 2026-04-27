@@ -188,11 +188,11 @@
           <div class="field-group-title">Frequencies</div>
           <div class="field-row">
             <span class="field-label">RX Frequency (MHz)</span>
-            <input type="text" id="ch-rxfreq" class="field-input" placeholder="446.95000">
+            <input type="number" id="ch-rxfreq" class="field-input" min="100" max="520" step="0.0001" placeholder="446.9500">
           </div>
           <div class="field-row">
             <span class="field-label">TX Frequency (MHz)</span>
-            <input type="text" id="ch-txfreq" class="field-input" placeholder="441.95000">
+            <input type="number" id="ch-txfreq" class="field-input" min="100" max="520" step="0.0001" placeholder="441.9500">
           </div>
         </div>
         <div class="field-group" id="ch-dmr-fields">
@@ -205,8 +205,25 @@
             </select>
           </div>
           <div class="field-row">
-            <span class="field-label">Color Code (0&ndash;15)</span>
-            <input type="number" id="ch-cc" min="0" max="15" class="field-input">
+            <span class="field-label">Color Code</span>
+            <select id="ch-cc" class="field-select">
+              <option value="0">0</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="7">7</option>
+              <option value="8">8</option>
+              <option value="9">9</option>
+              <option value="10">10</option>
+              <option value="11">11</option>
+              <option value="12">12</option>
+              <option value="13">13</option>
+              <option value="14">14</option>
+              <option value="15">15</option>
+            </select>
           </div>
           <div class="field-row">
             <span class="field-label">Contact</span>
@@ -814,7 +831,20 @@
     syncChannelModeFields();
   }
 
+  function validateFreq(val) {
+    const f = parseFloat(val);
+    if (isNaN(f) || f < 100.0 || f > 520.0) return false;
+    const dot = String(val).indexOf('.');
+    return dot < 0 || String(val).length - dot - 1 <= 4;
+  }
+
   function saveChannel() {
+    const rxVal = document.getElementById('ch-rxfreq').value;
+    const txVal = document.getElementById('ch-txfreq').value;
+    if (!validateFreq(rxVal) || !validateFreq(txVal)) {
+      alert('Frequencies must be between 100.0000 and 520.0000 MHz with up to 4 decimal places.');
+      return;
+    }
     let slotIndex = editState.obj ? editState.obj.slotIndex : null;
     if (slotIndex === null) {
       slotIndex = codeplug.addChannel();
@@ -825,8 +855,8 @@
       slotIndex,
       name:       document.getElementById('ch-name').value.substring(0, 16),
       mode,
-      rxMHz:      document.getElementById('ch-rxfreq').value,
-      txMHz:      document.getElementById('ch-txfreq').value,
+      rxMHz:      rxVal,
+      txMHz:      txVal,
       timeslot:   parseInt(document.getElementById('ch-timeslot').value, 10),
       colorCode:  parseInt(document.getElementById('ch-cc').value, 10) & 0x0F,
       contactIdx: parseInt(document.getElementById('ch-contact').value, 10),
