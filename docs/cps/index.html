@@ -942,7 +942,7 @@
     const rxVal = document.getElementById('ch-rxfreq').value;
     const txVal = document.getElementById('ch-txfreq').value;
     if (!validateFreq(rxVal) || !validateFreq(txVal)) {
-      alert('Frequencies must be between 100.0000 and 520.0000 MHz with up to 5 decimal places.');
+      alert('Frequencies must be between 100.00000 and 520.00000 MHz with up to 5 decimal places.');
       return;
     }
     let slotIndex = editState.obj ? editState.obj.slotIndex : null;
