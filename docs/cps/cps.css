@@ -1,0 +1,410 @@
+/* ─── CPS-specific styles ─────────────────────────────────────────────────── */
+/* Imports and extends the root CSS variables from ../style.css */
+
+/* ── Layout ──────────────────────────────────────────────────────────────── */
+
+.cps-layout {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 0px); /* adjusted via JS for header+nav height */
+  overflow: hidden;
+}
+
+main.cps-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-width: none;
+  padding: 0;
+  margin: 0;
+}
+
+/* ── Info bar ─────────────────────────────────────────────────────────────── */
+
+.info-bar {
+  background: #192235;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.info-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.info-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.info-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', monospace;
+}
+
+.info-value.placeholder {
+  color: var(--locked-text);
+  font-style: italic;
+  font-weight: 400;
+  font-family: inherit;
+}
+
+.info-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.info-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* ── Tab bar ──────────────────────────────────────────────────────────────── */
+
+.tab-bar {
+  background: #141e2e;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: stretch;
+  padding: 0 20px;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 10px 14px 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transition: color .15s, border-color .15s;
+  white-space: nowrap;
+}
+
+.tab-btn:hover {
+  color: var(--text);
+}
+
+.tab-btn.active {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+  font-weight: 600;
+}
+
+.tab-count {
+  background: var(--blue-tint);
+  color: #93c5fd;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  min-width: 22px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.tab-btn.active .tab-count {
+  background: var(--blue);
+  color: #fff;
+}
+
+/* ── Table area ───────────────────────────────────────────────────────────── */
+
+.table-area {
+  flex: 1;
+  overflow: auto;
+}
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+table.cps-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+table.cps-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+table.cps-table th {
+  background: #141e2e;
+  border-bottom: 2px solid var(--border);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 8px 12px;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+table.cps-table th:first-child { padding-left: 20px; }
+table.cps-table td:first-child { padding-left: 20px; }
+table.cps-table th:last-child  { padding-right: 20px; }
+table.cps-table td:last-child  { padding-right: 20px; }
+
+table.cps-table td {
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  padding: 7px 12px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+table.cps-table tbody tr:hover td {
+  background: rgba(59,130,246,.06);
+}
+
+.col-num {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  width: 3em;
+}
+
+.col-mono {
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', monospace;
+  font-size: 0.8rem;
+}
+
+.col-name {
+  font-weight: 600;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Mode / type badges ───────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block;
+  border-radius: 5px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  text-transform: uppercase;
+}
+
+.badge-dmr {
+  background: rgba(59,130,246,.18);
+  color: #93c5fd;
+}
+
+.badge-fm {
+  background: rgba(34,197,94,.15);
+  color: #86efac;
+}
+
+.badge-group {
+  background: rgba(59,130,246,.15);
+  color: #93c5fd;
+}
+
+.badge-private {
+  background: rgba(251,191,36,.12);
+  color: #fde68a;
+}
+
+.badge-all {
+  background: rgba(248,113,113,.12);
+  color: #fca5a5;
+}
+
+.badge-ts {
+  background: rgba(139,92,246,.15);
+  color: #c4b5fd;
+  font-size: 0.65rem;
+}
+
+.badge-rxonly {
+  background: rgba(248,113,113,.12);
+  color: #fca5a5;
+}
+
+/* ── CSS tone ─────────────────────────────────────────────────────────────── */
+
+.css-tone {
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', monospace;
+  font-size: 0.78rem;
+  color: #a5f3fc;
+}
+
+/* ── Zone channel pills ───────────────────────────────────────────────────── */
+
+.zone-channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 400px;
+}
+
+.ch-pill {
+  background: #1e3a5f;
+  border: 1px solid #2d5a8e;
+  border-radius: 4px;
+  color: #93c5fd;
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+/* ── Empty state ──────────────────────────────────────────────────────────── */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 48px 40px;
+  max-width: 480px;
+  width: 100%;
+  transition: border-color .2s, background .2s;
+  cursor: pointer;
+}
+
+.drop-zone.dragover {
+  border-color: var(--blue);
+  background: rgba(59,130,246,.06);
+}
+
+.drop-zone-icon {
+  font-size: 2.5rem;
+  margin-bottom: 16px;
+  opacity: .6;
+}
+
+.drop-zone h2 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.drop-zone p {
+  color: var(--muted);
+  font-size: 0.875rem;
+  margin-bottom: 20px;
+}
+
+.drop-zone .file-types {
+  color: var(--locked-text);
+  font-size: 0.78rem;
+  margin-top: 12px;
+}
+
+/* ── Buttons (CPS variants) ───────────────────────────────────────────────── */
+
+.btn-sm {
+  font-size: 0.8rem;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: opacity .15s, background .15s;
+}
+
+.btn-sm:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+
+.btn-sm-primary {
+  background: var(--blue);
+  color: #fff;
+}
+.btn-sm-primary:hover:not(:disabled) { background: var(--blue-dark); }
+
+.btn-sm-outline {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.btn-sm-outline:hover:not(:disabled) { background: rgba(255,255,255,.05); }
+
+.btn-sm-danger {
+  background: transparent;
+  border: 1px solid rgba(248,113,113,.3);
+  color: #f87171;
+}
+.btn-sm-danger:hover:not(:disabled) { background: rgba(248,113,113,.1); }
+
+/* ── Search / toolbar ─────────────────────────────────────────────────────── */
+
+.table-toolbar {
+  background: #141e2e;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  flex-shrink: 0;
+}
+
+.search-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.8rem;
+  padding: 5px 10px;
+  width: 200px;
+}
+
+.search-input::placeholder { color: var(--locked-text); }
+.search-input:focus { outline: none; border-color: var(--blue); }
+
+.row-count {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-left: auto;
+}
+
+/* ── Filename in info bar ─────────────────────────────────────────────────── */
+
+.filename-chip {
+  background: var(--blue-tint);
+  border: 1px solid #2d5a8e;
+  border-radius: 5px;
+  color: #93c5fd;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', monospace;
+}

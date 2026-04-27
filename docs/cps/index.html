@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClearDMR Web CPS</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="cps.css">
+</head>
+<body class="cps-layout">
+
+  <header class="site-header">
+    <div class="container">
+      <div class="brand">
+        <a href="../index.html" class="brand-link"><span class="brand-name">ClearDMR</span></a>
+        <span class="brand-badge">Web CPS</span>
+      </div>
+      <p class="brand-tagline">
+        Community firmware for Baofeng DM-1701 &bull; TYT MD-UV380 &bull; Retevis RT84
+      </p>
+    </div>
+  </header>
+
+  <nav class="site-nav">
+    <div class="container">
+      <ul class="nav-links">
+        <li><a href="../index.html" class="nav-link">Flash</a></li>
+        <li><a href="../setup.html" class="nav-link">Setup Guide</a></li>
+        <li><a href="index.html" class="nav-link active">CPS</a></li>
+        <li><a href="../about.html" class="nav-link">About</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Info bar -->
+  <div class="info-bar" id="info-bar">
+    <div class="info-field">
+      <span class="info-label">Callsign</span>
+      <span class="info-value placeholder" id="ib-callsign">—</span>
+    </div>
+    <div class="info-sep"></div>
+    <div class="info-field">
+      <span class="info-label">DMR ID</span>
+      <span class="info-value placeholder" id="ib-dmrid">—</span>
+    </div>
+    <div class="info-sep"></div>
+    <div class="info-field">
+      <span class="info-label">File</span>
+      <span class="info-value placeholder" id="ib-filename">No file loaded</span>
+    </div>
+
+    <div class="info-actions">
+      <input type="file" id="file-input" accept=".g77,.cdmr" hidden>
+      <button class="btn-sm btn-sm-outline" id="open-btn" type="button">Open .g77 / .cdmr</button>
+      <button class="btn-sm btn-sm-primary" id="save-btn" type="button" disabled>Save .cdmr</button>
+    </div>
+  </div>
+
+  <!-- Tab bar -->
+  <div class="tab-bar" id="tab-bar">
+    <button class="tab-btn active" data-tab="channels" type="button">
+      Channels <span class="tab-count" id="count-channels">0</span>
+    </button>
+    <button class="tab-btn" data-tab="zones" type="button">
+      Zones <span class="tab-count" id="count-zones">0</span>
+    </button>
+    <button class="tab-btn" data-tab="contacts" type="button">
+      Contacts <span class="tab-count" id="count-contacts">0</span>
+    </button>
+  </div>
+
+  <!-- Main area -->
+  <main class="cps-main">
+
+    <!-- Empty state -->
+    <div id="empty-state" class="empty-state">
+      <div class="drop-zone" id="drop-zone">
+        <div class="drop-zone-icon">&#128223;</div>
+        <h2>Open a Codeplug</h2>
+        <p>Drag and drop a <strong>.g77</strong> or <strong>.cdmr</strong> file here,<br>
+           or click the <strong>Open</strong> button above.</p>
+        <button class="btn-sm btn-sm-primary" id="drop-open-btn" type="button">Choose file&hellip;</button>
+        <p class="file-types">Supported: .g77 (OpenGD77) &bull; .cdmr (ClearDMR)</p>
+      </div>
+    </div>
+
+    <!-- Table area (hidden until a file is loaded) -->
+    <div id="table-area" class="table-area hidden">
+
+      <!-- Channels panel -->
+      <div id="panel-channels" class="tab-panel active">
+        <div class="table-toolbar">
+          <input type="text" class="search-input" id="search-channels" placeholder="Filter channels&hellip;">
+          <span class="row-count" id="rc-channels"></span>
+        </div>
+        <table class="cps-table" id="tbl-channels">
+          <thead>
+            <tr>
+              <th class="col-num">#</th>
+              <th>Name</th>
+              <th>Mode</th>
+              <th>RX Freq</th>
+              <th>TX Freq</th>
+              <th>TS / CC</th>
+              <th>Contact</th>
+              <th>BW</th>
+              <th>Tone</th>
+              <th>Flags</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-channels"></tbody>
+        </table>
+      </div>
+
+      <!-- Zones panel -->
+      <div id="panel-zones" class="tab-panel">
+        <div class="table-toolbar">
+          <input type="text" class="search-input" id="search-zones" placeholder="Filter zones&hellip;">
+          <span class="row-count" id="rc-zones"></span>
+        </div>
+        <table class="cps-table" id="tbl-zones">
+          <thead>
+            <tr>
+              <th class="col-num">#</th>
+              <th>Name</th>
+              <th>Channel Count</th>
+              <th>Channels</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-zones"></tbody>
+        </table>
+      </div>
+
+      <!-- Contacts panel -->
+      <div id="panel-contacts" class="tab-panel">
+        <div class="table-toolbar">
+          <input type="text" class="search-input" id="search-contacts" placeholder="Filter contacts&hellip;">
+          <span class="row-count" id="rc-contacts"></span>
+        </div>
+        <table class="cps-table" id="tbl-contacts">
+          <thead>
+            <tr>
+              <th class="col-num">#</th>
+              <th>Name</th>
+              <th>Type</th>
+              <th>TG / DMR ID</th>
+              <th>Ring Alert</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-contacts"></tbody>
+        </table>
+      </div>
+
+    </div><!-- /#table-area -->
+
+  </main>
+
+  <script src="cps.js"></script>
+  <script>
+  'use strict';
+
+  // ── State ──────────────────────────────────────────────────────────────────
+
+  let codeplug = null;  // CodeplugParser instance
+
+  // ── Element refs ──────────────────────────────────────────────────────────
+
+  const fileInput    = document.getElementById('file-input');
+  const openBtn      = document.getElementById('open-btn');
+  const dropOpenBtn  = document.getElementById('drop-open-btn');
+  const saveBtn      = document.getElementById('save-btn');
+  const dropZone     = document.getElementById('drop-zone');
+  const emptyState   = document.getElementById('empty-state');
+  const tableArea    = document.getElementById('table-area');
+
+  const ibCallsign   = document.getElementById('ib-callsign');
+  const ibDmrId      = document.getElementById('ib-dmrid');
+  const ibFilename   = document.getElementById('ib-filename');
+
+  const tabBtns      = document.querySelectorAll('.tab-btn');
+  const tabPanels    = { channels: document.getElementById('panel-channels'),
+                         zones:    document.getElementById('panel-zones'),
+                         contacts: document.getElementById('panel-contacts') };
+
+  const countEls     = { channels: document.getElementById('count-channels'),
+                         zones:    document.getElementById('count-zones'),
+                         contacts: document.getElementById('count-contacts') };
+
+  const rcEls        = { channels: document.getElementById('rc-channels'),
+                         zones:    document.getElementById('rc-zones'),
+                         contacts: document.getElementById('rc-contacts') };
+
+  const tbodies      = { channels: document.getElementById('tbody-channels'),
+                         zones:    document.getElementById('tbody-zones'),
+                         contacts: document.getElementById('tbody-contacts') };
+
+  const searches     = { channels: document.getElementById('search-channels'),
+                         zones:    document.getElementById('search-zones'),
+                         contacts: document.getElementById('search-contacts') };
+
+  // ── File open ─────────────────────────────────────────────────────────────
+
+  openBtn.addEventListener('click',    () => fileInput.click());
+  dropOpenBtn.addEventListener('click',() => fileInput.click());
+  fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+
+  dropZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    dropZone.classList.add('dragover');
+  });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    const f = e.dataTransfer.files[0];
+    if (f) loadFile(f);
+  });
+
+  // Also allow drag onto entire window when empty state is visible
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', e => {
+    e.preventDefault();
+    const f = e.dataTransfer.files[0];
+    if (f && !codeplug) loadFile(f);
+  });
+
+  async function loadFile(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (ext !== 'g77' && ext !== 'cdmr') {
+      alert(`Unsupported file type ".${ext}". Please open a .g77 or .cdmr file.`);
+      return;
+    }
+    try {
+      codeplug = await CodeplugParser.fromFile(file);
+      renderAll();
+    } catch (err) {
+      alert('Failed to read codeplug: ' + err.message);
+    }
+  }
+
+  // ── Save ──────────────────────────────────────────────────────────────────
+
+  saveBtn.addEventListener('click', () => {
+    if (!codeplug) return;
+    const buf  = codeplug.toArrayBuffer();
+    const blob = new Blob([buf], { type: 'application/octet-stream' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    const base = (codeplug.filename || 'codeplug').replace(/\.(g77|cdmr)$/i, '');
+    a.href     = url;
+    a.download = base + '.cdmr';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  // ── Tabs ──────────────────────────────────────────────────────────────────
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      tabBtns.forEach(b => b.classList.toggle('active', b === btn));
+      Object.entries(tabPanels).forEach(([key, el]) => el.classList.toggle('active', key === tab));
+    });
+  });
+
+  // ── Search / filter ───────────────────────────────────────────────────────
+
+  Object.entries(searches).forEach(([key, el]) => {
+    el.addEventListener('input', () => filterTable(key, el.value.toLowerCase()));
+  });
+
+  function filterTable(tab, query) {
+    const rows = tbodies[tab].querySelectorAll('tr');
+    let visible = 0;
+    rows.forEach(row => {
+      const match = !query || row.textContent.toLowerCase().includes(query);
+      row.style.display = match ? '' : 'none';
+      if (match) visible++;
+    });
+    rcEls[tab].textContent = query ? `${visible} of ${rows.length}` : `${rows.length} rows`;
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  function renderAll() {
+    if (!codeplug) return;
+
+    // Info bar
+    const gs = codeplug.generalSettings;
+    setInfoValue(ibCallsign, gs.radioName || '—');
+    setInfoValue(ibDmrId,    gs.dmrId     ? gs.dmrId.toString() : '—');
+    const fn = codeplug.filename || 'unknown';
+    ibFilename.textContent = fn;
+    ibFilename.className = 'filename-chip';
+
+    saveBtn.disabled = false;
+
+    // Channels
+    const channels = codeplug.channels;
+    renderChannels(channels);
+    countEls.channels.textContent = channels.length;
+    rcEls.channels.textContent = channels.length + ' rows';
+
+    // Zones
+    const zones = codeplug.zones;
+    renderZones(zones, channels);
+    countEls.zones.textContent = zones.length;
+    rcEls.zones.textContent = zones.length + ' rows';
+
+    // Contacts
+    const contacts = codeplug.contacts;
+    renderContacts(contacts);
+    countEls.contacts.textContent = contacts.length;
+    rcEls.contacts.textContent = contacts.length + ' rows';
+
+    // Show table area
+    emptyState.classList.add('hidden');
+    tableArea.classList.remove('hidden');
+  }
+
+  function setInfoValue(el, text) {
+    el.textContent = text;
+    el.classList.remove('placeholder');
+  }
+
+  // ── Channel table ──────────────────────────────────────────────────────────
+
+  function renderChannels(channels) {
+    const tbody = tbodies.channels;
+    tbody.innerHTML = '';
+
+    // Build contact lookup for quick name resolution
+    let contacts = [];
+    try { contacts = codeplug.contacts; } catch (_) {}
+    const contactName = idx => (contacts[idx - 1] || {}).name || '';
+
+    channels.forEach(ch => {
+      const tr = document.createElement('tr');
+
+      const tsCC = ch.mode === 'DMR'
+        ? `<span class="badge badge-ts">TS${ch.timeslot}</span> CC${ch.colorCode}`
+        : '—';
+
+      const bw = ch.mode === 'FM'
+        ? `<span class="badge">${ch.bandwidth}</span>`
+        : '—';
+
+      const tone = ch.css
+        ? `<span class="css-tone">${ch.css.kind}: ${ch.css.value}</span>`
+        : '—';
+
+      const flags = [];
+      if (ch.rxOnly) flags.push('<span class="badge badge-rxonly">RX</span>');
+
+      const contact = (ch.mode === 'DMR' && ch.contactIdx)
+        ? escHtml(contactName(ch.contactIdx))
+        : '—';
+
+      tr.innerHTML = `
+        <td class="col-num">${ch.number}</td>
+        <td class="col-name">${escHtml(ch.name)}</td>
+        <td><span class="badge badge-${ch.mode.toLowerCase()}">${ch.mode}</span></td>
+        <td class="col-mono">${ch.rxMHz}</td>
+        <td class="col-mono">${ch.txMHz}</td>
+        <td>${tsCC}</td>
+        <td>${contact}</td>
+        <td>${bw}</td>
+        <td>${tone}</td>
+        <td>${flags.join(' ') || '—'}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ── Zone table ────────────────────────────────────────────────────────────
+
+  function renderZones(zones, channels) {
+    const tbody = tbodies.zones;
+    tbody.innerHTML = '';
+
+    const chName = idx => {
+      const ch = channels.find(c => c.number === idx);
+      return ch ? ch.name : `CH${idx}`;
+    };
+
+    zones.forEach(zone => {
+      const tr = document.createElement('tr');
+      const pills = zone.channels.slice(0, 30).map(idx =>
+        `<span class="ch-pill">${escHtml(chName(idx))}</span>`
+      ).join('');
+      const overflow = zone.channels.length > 30
+        ? `<span class="ch-pill">+${zone.channels.length - 30} more</span>`
+        : '';
+
+      tr.innerHTML = `
+        <td class="col-num">${zone.number}</td>
+        <td class="col-name">${escHtml(zone.name)}</td>
+        <td>${zone.channels.length}</td>
+        <td><div class="zone-channels">${pills}${overflow}</div></td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ── Contact table ──────────────────────────────────────────────────────────
+
+  function renderContacts(contacts) {
+    const tbody = tbodies.contacts;
+    tbody.innerHTML = '';
+
+    contacts.forEach(ct => {
+      const tr = document.createElement('tr');
+      const typeClass = ct.callType.toLowerCase();
+      tr.innerHTML = `
+        <td class="col-num">${ct.number}</td>
+        <td class="col-name">${escHtml(ct.name)}</td>
+        <td><span class="badge badge-${typeClass}">${ct.callType}</span></td>
+        <td class="col-mono">${ct.tgNumber}</td>
+        <td>${ct.ringAlert ? '&#9679;' : '—'}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ── Util ──────────────────────────────────────────────────────────────────
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  </script>
+</body>
+</html>
