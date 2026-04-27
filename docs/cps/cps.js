@@ -187,6 +187,7 @@ class CodeplugParser {
     const txFreq     = readFreq(v,  base + 20);
     const mode       = v.getUint8(base + 24);
     const rxToneRaw  = v.getUint16(base + 32, true);
+    const txToneRaw  = v.getUint16(base + 34, true);
     const colorCode  = v.getUint8(base + 44) & 0x0F;
     const contactIdx = v.getUint16(base + 46, true);
     const flag2      = v.getUint8(base + 49);
@@ -195,7 +196,8 @@ class CodeplugParser {
     const isTS2      = !!(flag2 & FLAG2_TS2);
     const bw25k      = !!(flag4 & FLAG4_BW_25K);
     const rxOnly     = !!(flag4 & FLAG4_RX_ONLY);
-    const css        = isDMR ? null : decodeCss(rxToneRaw);
+    const rxCss      = isDMR ? null : decodeCss(rxToneRaw);
+    const txCss      = isDMR ? null : decodeCss(txToneRaw);
     return {
       slotIndex,
       number,
@@ -207,8 +209,9 @@ class CodeplugParser {
       colorCode:  isDMR ? colorCode : null,
       contactIdx: isDMR ? contactIdx : null,
       bandwidth:  isDMR ? null : (bw25k ? '25K' : '12.5K'),
-      css,
-      cssStr:     css ? css.str : '',
+      css:        rxCss,
+      rxCssStr:   rxCss ? rxCss.str : '',
+      txCssStr:   txCss ? txCss.str : '',
       rxOnly,
     };
   }
@@ -220,8 +223,8 @@ class CodeplugParser {
     v.setUint32(base + 16, int2bcd(mhzToTenHz(ch.rxMHz)), true);
     v.setUint32(base + 20, int2bcd(mhzToTenHz(ch.txMHz)), true);
     v.setUint8(base + 24, ch.mode === 'DMR' ? 1 : 0);
-    v.setUint16(base + 32, ch.mode === 'FM' ? encodeCss(ch.cssStr) : 0, true);
-    v.setUint16(base + 34, 0, true);
+    v.setUint16(base + 32, ch.mode === 'FM' ? encodeCss(ch.rxCssStr) : 0, true);
+    v.setUint16(base + 34, ch.mode === 'FM' ? encodeCss(ch.txCssStr) : 0, true);
     const existCC = v.getUint8(base + 44);
     v.setUint8(base + 44, ch.mode === 'DMR' ? ((existCC & 0xF0) | (ch.colorCode & 0x0F)) : (existCC & 0xF0));
     v.setUint16(base + 46, ch.mode === 'DMR' ? (ch.contactIdx || 0) : 0, true);

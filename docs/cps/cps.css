@@ -441,12 +441,15 @@ table.cps-table tbody tr:hover td {
   border-radius: var(--radius);
   box-shadow: 0 20px 60px rgba(0,0,0,.6);
   color: var(--text);
-  display: flex;
-  flex-direction: column;
   max-height: 90vh;
   max-width: 500px;
   padding: 0;
   width: calc(100vw - 32px);
+}
+
+.edit-modal[open] {
+  display: flex;
+  flex-direction: column;
 }
 
 .edit-modal::backdrop { background: rgba(0,0,0,.6); }
@@ -667,3 +670,27 @@ table.cps-table tbody tr:hover td {
   transition: color .15s, background .15s;
 }
 .btn-row-delete:hover { background: rgba(248,113,113,.1); color: #f87171; }
+
+/* ── Tone selectors ───────────────────────────────────────────────────────── */
+
+.tone-selector {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tone-selector > .field-select { flex: 0 0 80px; }
+.tone-selector > .field-input  { flex: 1; min-width: 50px; }
+
+.tone-dcs {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tone-dcs .field-input  { flex: 0 0 52px; }
+.tone-dcs .field-select { flex: 1; }

@@ -224,7 +224,39 @@
           </div>
           <div class="field-row">
             <span class="field-label">RX Tone</span>
-            <input type="text" id="ch-csstx" class="field-input" placeholder="e.g. 88.5 or D023N">
+            <div class="tone-selector">
+              <select class="field-select" id="ch-rxtone-type">
+                <option value="none">None</option>
+                <option value="ctcss">CTCSS</option>
+                <option value="dcs">DCS</option>
+              </select>
+              <input type="text" id="ch-rxtone-freq" class="field-input hidden" placeholder="Hz e.g. 88.5">
+              <div class="tone-dcs hidden" id="ch-rxtone-dcs">
+                <input type="number" id="ch-rxtone-code" class="field-input" min="0" max="777" placeholder="023">
+                <select class="field-select" id="ch-rxtone-pol">
+                  <option value="N">Normal</option>
+                  <option value="I">Inverted</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="field-row">
+            <span class="field-label">TX Tone</span>
+            <div class="tone-selector">
+              <select class="field-select" id="ch-txtone-type">
+                <option value="none">None</option>
+                <option value="ctcss">CTCSS</option>
+                <option value="dcs">DCS</option>
+              </select>
+              <input type="text" id="ch-txtone-freq" class="field-input hidden" placeholder="Hz e.g. 88.5">
+              <div class="tone-dcs hidden" id="ch-txtone-dcs">
+                <input type="number" id="ch-txtone-code" class="field-input" min="0" max="777" placeholder="023">
+                <select class="field-select" id="ch-txtone-pol">
+                  <option value="N">Normal</option>
+                  <option value="I">Inverted</option>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
         <div class="field-group">
@@ -719,6 +751,43 @@
     document.getElementById('ch-fm-fields').classList.toggle('hidden',  isDMR);
   }
 
+  // ── Tone selectors ────────────────────────────────────────────────────────
+
+  document.getElementById('ch-rxtone-type').addEventListener('change', () => syncToneSelector('rx'));
+  document.getElementById('ch-txtone-type').addEventListener('change', () => syncToneSelector('tx'));
+
+  function syncToneSelector(prefix) {
+    const type = document.getElementById(`ch-${prefix}tone-type`).value;
+    document.getElementById(`ch-${prefix}tone-freq`).classList.toggle('hidden', type !== 'ctcss');
+    document.getElementById(`ch-${prefix}tone-dcs`).classList.toggle('hidden',  type !== 'dcs');
+  }
+
+  function populateToneSelector(prefix, cssStr) {
+    const s = (cssStr || '').trim().toUpperCase();
+    if (!s) {
+      document.getElementById(`ch-${prefix}tone-type`).value = 'none';
+    } else if (s.startsWith('D')) {
+      document.getElementById(`ch-${prefix}tone-type`).value = 'dcs';
+      document.getElementById(`ch-${prefix}tone-code`).value = parseInt(s.substring(1, 4), 10) || 0;
+      document.getElementById(`ch-${prefix}tone-pol`).value  = s.endsWith('I') ? 'I' : 'N';
+    } else {
+      document.getElementById(`ch-${prefix}tone-type`).value = 'ctcss';
+      document.getElementById(`ch-${prefix}tone-freq`).value = cssStr.trim();
+    }
+    syncToneSelector(prefix);
+  }
+
+  function readToneSelector(prefix) {
+    const type = document.getElementById(`ch-${prefix}tone-type`).value;
+    if (type === 'ctcss') return document.getElementById(`ch-${prefix}tone-freq`).value.trim();
+    if (type === 'dcs') {
+      const code = parseInt(document.getElementById(`ch-${prefix}tone-code`).value, 10) || 0;
+      const pol  = document.getElementById(`ch-${prefix}tone-pol`).value;
+      return `D${String(code).padStart(3, '0')}${pol}`;
+    }
+    return '';
+  }
+
   function populateChannelForm(ch) {
     document.getElementById('ch-name').value    = ch ? ch.name    : '';
     document.getElementById('ch-mode').value    = ch ? ch.mode    : 'FM';
@@ -726,8 +795,9 @@
     document.getElementById('ch-txfreq').value  = ch ? ch.txMHz   : '';
     document.getElementById('ch-timeslot').value = ch && ch.timeslot ? ch.timeslot : 1;
     document.getElementById('ch-cc').value      = ch && ch.colorCode != null ? ch.colorCode : 0;
-    document.getElementById('ch-bw').value      = ch && ch.bandwidth ? ch.bandwidth : '12.5K';
-    document.getElementById('ch-csstx').value   = ch ? ch.cssStr  : '';
+    document.getElementById('ch-bw').value       = ch && ch.bandwidth ? ch.bandwidth : '12.5K';
+    populateToneSelector('rx', ch ? ch.rxCssStr : '');
+    populateToneSelector('tx', ch ? ch.txCssStr : '');
     document.getElementById('ch-rxonly').checked = ch ? ch.rxOnly : false;
 
     // Populate contact dropdown from current contacts list
@@ -761,7 +831,8 @@
       colorCode:  parseInt(document.getElementById('ch-cc').value, 10) & 0x0F,
       contactIdx: parseInt(document.getElementById('ch-contact').value, 10),
       bandwidth:  document.getElementById('ch-bw').value,
-      cssStr:     document.getElementById('ch-csstx').value,
+      rxCssStr:   readToneSelector('rx'),
+      txCssStr:   readToneSelector('tx'),
       rxOnly:     document.getElementById('ch-rxonly').checked,
     });
     closeModal();
