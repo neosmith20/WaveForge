@@ -50,6 +50,7 @@
     </div>
     <div class="info-actions">
       <input type="file" id="file-input" accept=".g77,.cdmr" hidden>
+      <button class="btn-sm btn-sm-outline" id="new-btn" type="button">New Codeplug</button>
       <button class="btn-sm btn-sm-outline" id="open-btn" type="button">Open .g77 / .cdmr</button>
       <button class="btn-sm btn-sm-primary" id="save-btn" type="button" disabled>Save .cdmr</button>
     </div>
@@ -73,13 +74,23 @@
 
     <!-- Empty state -->
     <div id="empty-state" class="empty-state">
-      <div class="drop-zone" id="drop-zone">
-        <div class="drop-zone-icon">&#128223;</div>
-        <h2>Open a Codeplug</h2>
-        <p>Drag and drop a <strong>.g77</strong> or <strong>.cdmr</strong> file here,<br>
-           or click the <strong>Open</strong> button above.</p>
-        <button class="btn-sm btn-sm-primary" id="drop-open-btn" type="button">Choose file&hellip;</button>
-        <p class="file-types">Supported: .g77 (OpenGD77) &bull; .cdmr (ClearDMR)</p>
+      <div class="empty-options">
+        <div class="drop-zone" id="drop-zone">
+          <div class="drop-zone-icon">&#128223;</div>
+          <h2>Open a Codeplug</h2>
+          <p>Drag and drop a <strong>.g77</strong> or <strong>.cdmr</strong> file here,
+             or click <strong>Open</strong> above.</p>
+          <button class="btn-sm btn-sm-outline" id="drop-open-btn" type="button">Choose file&hellip;</button>
+          <p class="file-types">Supported: .g77 (OpenGD77) &bull; .cdmr (ClearDMR)</p>
+        </div>
+        <div class="empty-divider"><span>or</span></div>
+        <div class="empty-new-card" id="empty-new-card">
+          <div class="drop-zone-icon">&#10024;</div>
+          <h2>Start Fresh</h2>
+          <p>No codeplug yet? The setup wizard creates a blank one in about 30 seconds &mdash; just enter your callsign and DMR&nbsp;ID.</p>
+          <button class="btn-sm btn-sm-primary" id="drop-new-btn" type="button">New Codeplug&hellip;</button>
+          <p class="file-types">All fields editable after creation</p>
+        </div>
       </div>
     </div>
 
@@ -353,6 +364,95 @@
       <div class="modal-spacer"></div>
       <button class="btn-sm btn-sm-outline" id="modal-cancel" type="button">Cancel</button>
       <button class="btn-sm btn-sm-primary" id="modal-save" type="button">Save</button>
+    </div>
+  </dialog>
+
+  <!-- New Codeplug Wizard -->
+  <dialog id="wizard-modal" class="wizard-modal">
+    <div class="modal-header">
+      <h3>New Codeplug</h3>
+      <button class="modal-close" id="wizard-close" type="button" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="wizard-progress" id="wizard-progress">
+      <div class="wprog-dot active" data-step="1"><span>1</span></div>
+      <div class="wprog-line"></div>
+      <div class="wprog-dot" data-step="2"><span>2</span></div>
+      <div class="wprog-line"></div>
+      <div class="wprog-dot" data-step="3"><span>3</span></div>
+    </div>
+
+    <div class="wizard-body">
+
+      <!-- Step 1: Callsign -->
+      <div class="wizard-step" id="wiz-step-1">
+        <div class="wiz-icon">&#128222;</div>
+        <h4 class="wiz-title">What&rsquo;s your callsign?</h4>
+        <p class="wiz-hint">
+          Your callsign is your radio identity &mdash; it&rsquo;s stored in the radio and shown on other
+          operators&rsquo; screens when you transmit. If you don&rsquo;t have a licence yet, you can
+          leave this blank and fill it in later.
+        </p>
+        <input type="text" id="wiz-callsign" class="wiz-input" maxlength="8"
+               placeholder="e.g. W0PWR" autocomplete="off" autocorrect="off" spellcheck="false">
+        <p class="wiz-subhint">Up to 8 characters &bull; Letters and numbers only</p>
+      </div>
+
+      <!-- Step 2: DMR ID -->
+      <div class="wizard-step hidden" id="wiz-step-2">
+        <div class="wiz-icon">&#128268;</div>
+        <h4 class="wiz-title">What&rsquo;s your DMR ID?</h4>
+        <p class="wiz-hint">
+          Your DMR ID is a unique 7-digit number linked to your callsign. Other operators see it
+          when you call them, and the radio uses it to identify you on the network.
+          Registration is free and only needs to be done once.
+        </p>
+        <input type="number" id="wiz-dmrid" class="wiz-input"
+               min="1" max="9999999" placeholder="e.g. 3127005" autocomplete="off">
+        <p class="wiz-subhint">
+          Don&rsquo;t have one yet?
+          <a href="https://radioid.net" target="_blank" rel="noopener">Register free at radioid.net</a>
+          &mdash; approval takes 24&ndash;48 hours.<br>
+          <a href="#" id="wiz-skip-dmrid" class="wiz-skip">Skip for now &mdash; I&rsquo;ll enter it later</a>
+        </p>
+      </div>
+
+      <!-- Step 3: Radio model -->
+      <div class="wizard-step hidden" id="wiz-step-3">
+        <div class="wiz-icon">&#128225;</div>
+        <h4 class="wiz-title">Which radio do you have?</h4>
+        <p class="wiz-hint">
+          This is used to name your saved file. The codeplug format is identical across
+          all three radios &mdash; you can use the same file on any of them.
+        </p>
+        <div class="model-cards">
+          <label class="model-card">
+            <input type="radio" name="wiz-model" value="DM1701" checked>
+            <div class="model-card-body">
+              <span class="model-name">Baofeng DM-1701</span>
+            </div>
+          </label>
+          <label class="model-card">
+            <input type="radio" name="wiz-model" value="MDUV380">
+            <div class="model-card-body">
+              <span class="model-name">TYT MD-UV380</span>
+            </div>
+          </label>
+          <label class="model-card">
+            <input type="radio" name="wiz-model" value="RT84">
+            <div class="model-card-body">
+              <span class="model-name">Retevis RT84</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+    </div><!-- /.wizard-body -->
+
+    <div class="wizard-footer">
+      <button class="btn-sm btn-sm-outline" id="wiz-back" type="button">&#8249; Back</button>
+      <div class="modal-spacer"></div>
+      <button class="btn-sm btn-sm-primary" id="wiz-next" type="button">Next &#8250;</button>
     </div>
   </dialog>
 
@@ -992,6 +1092,97 @@
   function escHtml(str) {
     return String(str)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ── New Codeplug Wizard ───────────────────────────────────────────────────
+
+  const newBtn      = document.getElementById('new-btn');
+  const dropNewBtn  = document.getElementById('drop-new-btn');
+  const wizardModal = document.getElementById('wizard-modal');
+  const wizardClose = document.getElementById('wizard-close');
+  const wizBack     = document.getElementById('wiz-back');
+  const wizNext     = document.getElementById('wiz-next');
+
+  let wizStep = 1;
+
+  function openWizard() {
+    wizStep = 1;
+    document.getElementById('wiz-callsign').value = '';
+    document.getElementById('wiz-dmrid').value    = '';
+    document.querySelector('input[name="wiz-model"][value="DM1701"]').checked = true;
+    syncWizardStep();
+    wizardModal.showModal();
+  }
+
+  function closeWizard() { wizardModal.close(); }
+
+  function syncWizardStep() {
+    [1, 2, 3].forEach(n => {
+      document.getElementById(`wiz-step-${n}`).classList.toggle('hidden', n !== wizStep);
+    });
+    document.querySelectorAll('.wprog-dot').forEach(dot => {
+      const n = parseInt(dot.dataset.step, 10);
+      dot.classList.toggle('active', n === wizStep);
+      dot.classList.toggle('done',   n < wizStep);
+    });
+    document.querySelectorAll('.wprog-line').forEach((line, i) => {
+      line.classList.toggle('done', i + 1 < wizStep);
+    });
+    wizBack.style.visibility = wizStep > 1 ? 'visible' : 'hidden';
+    wizNext.textContent      = wizStep === 3 ? 'Create Codeplug' : 'Next ›';
+    if (wizStep === 1) document.getElementById('wiz-callsign').focus();
+    if (wizStep === 2) document.getElementById('wiz-dmrid').focus();
+  }
+
+  wizBack.addEventListener('click', () => {
+    if (wizStep > 1) { wizStep--; syncWizardStep(); }
+  });
+
+  wizNext.addEventListener('click', () => {
+    if (wizStep === 3) { createFromWizard(); return; }
+    if (wizStep === 1) {
+      document.getElementById('wiz-callsign').value =
+        document.getElementById('wiz-callsign').value.trim().toUpperCase();
+    }
+    wizStep++;
+    syncWizardStep();
+  });
+
+  document.getElementById('wiz-skip-dmrid').addEventListener('click', e => {
+    e.preventDefault();
+    document.getElementById('wiz-dmrid').value = '';
+    wizStep = 3;
+    syncWizardStep();
+  });
+
+  wizardClose.addEventListener('click', closeWizard);
+  wizardModal.addEventListener('click', e => { if (e.target === wizardModal) closeWizard(); });
+  wizardModal.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.tagName !== 'A' && e.target.tagName !== 'BUTTON') {
+      e.preventDefault();
+      wizNext.click();
+    }
+  });
+
+  newBtn.addEventListener('click',     openWizard);
+  dropNewBtn.addEventListener('click', openWizard);
+
+  // Make clicking the empty-new-card itself (not just the button) open the wizard
+  document.getElementById('empty-new-card').addEventListener('click', e => {
+    if (e.target.tagName !== 'BUTTON') openWizard();
+  });
+
+  function createFromWizard() {
+    const callsign = document.getElementById('wiz-callsign').value.trim().toUpperCase().substring(0, 8);
+    const dmrId    = parseInt(document.getElementById('wiz-dmrid').value, 10) || 0;
+    const model    = document.querySelector('input[name="wiz-model"]:checked').value;
+    const names    = { DM1701: 'DM-1701', MDUV380: 'MD-UV380', RT84: 'RT84' };
+
+    codeplug          = CodeplugParser.createBlank();
+    codeplug.filename = `${callsign || 'codeplug'}_${names[model] || model}.cdmr`;
+    codeplug.writeGeneralSettings({ radioName: callsign, dmrId });
+    closeWizard();
+    renderAll();
   }
 
   </script>

@@ -400,6 +400,19 @@ class CodeplugParser {
   // ── Serialise ─────────────────────────────────────────────────────────────────
   toArrayBuffer() { return this.buf.slice(0); }
 
+  static createBlank() {
+    const buf  = new ArrayBuffer(0x20000);
+    const u8   = new Uint8Array(buf);
+    const view = new DataView(buf);
+    u8.fill(0xFF);
+    // Zero bitmaps so no channels or zones appear as used
+    for (let i = 0; i < 16; i++) view.setUint8(ADDR.CHAN_BITMAP + i, 0x00);
+    for (let i = 0; i < 32; i++) view.setUint8(ADDR.ZONE_BITMAP + i, 0x00);
+    const p = new CodeplugParser(buf);
+    p.filename = 'new_codeplug.cdmr';
+    return p;
+  }
+
   static async fromFile(file) {
     const buf    = await file.arrayBuffer();
     const parser = new CodeplugParser(buf);
