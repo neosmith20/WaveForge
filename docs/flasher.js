@@ -12,6 +12,23 @@ const MODEL_NAMES = {
   RT84:    'Retevis RT84',
 };
 
+// Per-model donor file info. All three current radios use the same MD9600 donor;
+// future radios with different donor files can be added here independently.
+const DONOR_INFO = {
+  DM1701:  {
+    url:      'https://sa0bux.se/Ham/opengd77/MD9600-CSV(2571V5)-V26.45.bin',
+    filename: 'MD9600-CSV(2571V5)-V26.45.bin',
+  },
+  MDUV380: {
+    url:      'https://sa0bux.se/Ham/opengd77/MD9600-CSV(2571V5)-V26.45.bin',
+    filename: 'MD9600-CSV(2571V5)-V26.45.bin',
+  },
+  RT84: {
+    url:      'https://sa0bux.se/Ham/opengd77/MD9600-CSV(2571V5)-V26.45.bin',
+    filename: 'MD9600-CSV(2571V5)-V26.45.bin',
+  },
+};
+
 // STM32F405 DFU ROM bootloader USB identifiers (same across all three radio models)
 const DFU_FILTERS = [
   { vendorId: 0x0483, productId: 0xDF11 },
@@ -143,6 +160,7 @@ modelSelect.addEventListener('change', () => {
   markComplete(cardModel, 'step-num-1');
   unlock(cardConnect);
   connectBtn.disabled = false;
+  updateDonorHint(val);
   updateFlashSummary();
 });
 
@@ -605,6 +623,18 @@ function formatBytes(bytes) {
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ─── Donor hint ───────────────────────────────────────────────────────────────
+function updateDonorHint(model) {
+  const info = DONOR_INFO[model];
+  if (!info) return;
+  document.getElementById('donor-hint-default').classList.add('hidden');
+  document.getElementById('donor-model-name').textContent = MODEL_NAMES[model];
+  const link = document.getElementById('donor-download-link');
+  link.href        = info.url;
+  link.textContent = info.filename;
+  document.getElementById('donor-hint-model').classList.remove('hidden');
 }
 
 // ─── Windows driver notice ────────────────────────────────────────────────────

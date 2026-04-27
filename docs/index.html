@@ -147,13 +147,14 @@
             ClearDMR uses a vocoder &mdash; the audio codec that encodes and decodes DMR voice.
             Due to licensing restrictions, this codec cannot be bundled with ClearDMR.
             Instead, the flasher extracts it from your radio's <strong>original factory firmware</strong>,
-            which you already own a license to use.
+            which you already own a license to use. The file never leaves your browser.
           </p>
-          <p>
-            Obtain the original firmware <code>.bin</code> for your specific radio model from the
-            manufacturer's website, then select it below. The file never leaves your browser.
-            If you need a known-good donor file, you can
-            <a href="https://sa0bux.se/Ham/opengd77/MD9600-CSV(2571V5)-V26.45.bin" target="_blank" rel="noopener">download one here</a>.
+          <p id="donor-hint-default">
+            Select your radio model in Step&nbsp;1 to see the required donor file.
+          </p>
+          <p id="donor-hint-model" class="hidden">
+            For your <strong id="donor-model-name"></strong>, download the required donor file:
+            <a id="donor-download-link" href="#" target="_blank" rel="noopener"></a>.
           </p>
         </div>
         <div class="file-picker-area" id="donor-drop-area">

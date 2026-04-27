@@ -48,7 +48,6 @@
       <span class="info-label">File</span>
       <span class="info-value placeholder" id="ib-filename">No file loaded</span>
     </div>
-
     <div class="info-actions">
       <input type="file" id="file-input" accept=".g77,.cdmr" hidden>
       <button class="btn-sm btn-sm-outline" id="open-btn" type="button">Open .g77 / .cdmr</button>
@@ -57,7 +56,7 @@
   </div>
 
   <!-- Tab bar -->
-  <div class="tab-bar" id="tab-bar">
+  <div class="tab-bar">
     <button class="tab-btn active" data-tab="channels" type="button">
       Channels <span class="tab-count" id="count-channels">0</span>
     </button>
@@ -84,16 +83,17 @@
       </div>
     </div>
 
-    <!-- Table area (hidden until a file is loaded) -->
+    <!-- Table area -->
     <div id="table-area" class="table-area hidden">
 
       <!-- Channels panel -->
       <div id="panel-channels" class="tab-panel active">
         <div class="table-toolbar">
           <input type="text" class="search-input" id="search-channels" placeholder="Filter channels&hellip;">
+          <button class="btn-sm btn-sm-outline" id="add-channel-btn" type="button">+ Add Channel</button>
           <span class="row-count" id="rc-channels"></span>
         </div>
-        <table class="cps-table" id="tbl-channels">
+        <table class="cps-table">
           <thead>
             <tr>
               <th class="col-num">#</th>
@@ -106,6 +106,7 @@
               <th>BW</th>
               <th>Tone</th>
               <th>Flags</th>
+              <th class="col-actions"></th>
             </tr>
           </thead>
           <tbody id="tbody-channels"></tbody>
@@ -116,15 +117,17 @@
       <div id="panel-zones" class="tab-panel">
         <div class="table-toolbar">
           <input type="text" class="search-input" id="search-zones" placeholder="Filter zones&hellip;">
+          <button class="btn-sm btn-sm-outline" id="add-zone-btn" type="button">+ Add Zone</button>
           <span class="row-count" id="rc-zones"></span>
         </div>
-        <table class="cps-table" id="tbl-zones">
+        <table class="cps-table">
           <thead>
             <tr>
               <th class="col-num">#</th>
               <th>Name</th>
               <th>Channel Count</th>
               <th>Channels</th>
+              <th class="col-actions"></th>
             </tr>
           </thead>
           <tbody id="tbody-zones"></tbody>
@@ -135,9 +138,10 @@
       <div id="panel-contacts" class="tab-panel">
         <div class="table-toolbar">
           <input type="text" class="search-input" id="search-contacts" placeholder="Filter contacts&hellip;">
+          <button class="btn-sm btn-sm-outline" id="add-contact-btn" type="button">+ Add Contact</button>
           <span class="row-count" id="rc-contacts"></span>
         </div>
-        <table class="cps-table" id="tbl-contacts">
+        <table class="cps-table">
           <thead>
             <tr>
               <th class="col-num">#</th>
@@ -145,6 +149,7 @@
               <th>Type</th>
               <th>TG / DMR ID</th>
               <th>Ring Alert</th>
+              <th class="col-actions"></th>
             </tr>
           </thead>
           <tbody id="tbody-contacts"></tbody>
@@ -155,48 +160,213 @@
 
   </main>
 
+  <!-- Edit modal (shared for channels / zones / contacts) -->
+  <dialog id="edit-modal" class="edit-modal">
+    <div class="modal-header">
+      <h3 id="modal-title">Edit</h3>
+      <button class="modal-close" id="modal-close" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Channel form -->
+      <div id="form-channel" class="edit-form hidden">
+        <div class="field-group">
+          <div class="field-group-title">Identity</div>
+          <div class="field-row">
+            <span class="field-label">Name</span>
+            <input type="text" id="ch-name" maxlength="16" class="field-input" placeholder="Channel name">
+          </div>
+          <div class="field-row">
+            <span class="field-label">Mode</span>
+            <select id="ch-mode" class="field-select">
+              <option value="FM">FM</option>
+              <option value="DMR">DMR</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-group">
+          <div class="field-group-title">Frequencies</div>
+          <div class="field-row">
+            <span class="field-label">RX Frequency (MHz)</span>
+            <input type="text" id="ch-rxfreq" class="field-input" placeholder="446.95000">
+          </div>
+          <div class="field-row">
+            <span class="field-label">TX Frequency (MHz)</span>
+            <input type="text" id="ch-txfreq" class="field-input" placeholder="441.95000">
+          </div>
+        </div>
+        <div class="field-group" id="ch-dmr-fields">
+          <div class="field-group-title">DMR Settings</div>
+          <div class="field-row">
+            <span class="field-label">Timeslot</span>
+            <select id="ch-timeslot" class="field-select">
+              <option value="1">1</option>
+              <option value="2">2</option>
+            </select>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Color Code (0&ndash;15)</span>
+            <input type="number" id="ch-cc" min="0" max="15" class="field-input">
+          </div>
+          <div class="field-row">
+            <span class="field-label">Contact</span>
+            <select id="ch-contact" class="field-select"></select>
+          </div>
+        </div>
+        <div class="field-group" id="ch-fm-fields">
+          <div class="field-group-title">FM Settings</div>
+          <div class="field-row">
+            <span class="field-label">Bandwidth</span>
+            <select id="ch-bw" class="field-select">
+              <option value="12.5K">12.5 kHz</option>
+              <option value="25K">25 kHz</option>
+            </select>
+          </div>
+          <div class="field-row">
+            <span class="field-label">RX Tone</span>
+            <input type="text" id="ch-csstx" class="field-input" placeholder="e.g. 88.5 or D023N">
+          </div>
+        </div>
+        <div class="field-group">
+          <div class="checkbox-row">
+            <input type="checkbox" id="ch-rxonly">
+            <label for="ch-rxonly">RX Only</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Zone form -->
+      <div id="form-zone" class="edit-form hidden">
+        <div class="field-group">
+          <div class="field-group-title">Identity</div>
+          <div class="field-row">
+            <span class="field-label">Name</span>
+            <input type="text" id="zone-name" maxlength="16" class="field-input" placeholder="Zone name">
+          </div>
+        </div>
+        <div class="field-group">
+          <div class="field-group-title">Channels (up to 80, in order)</div>
+          <div style="padding:10px">
+            <div class="zone-editor">
+              <div class="zone-col">
+                <div class="zone-col-header">Available</div>
+                <div class="zone-list" id="zone-avail"></div>
+              </div>
+              <div class="zone-btns">
+                <button class="zone-btn" id="zone-add-ch" type="button" title="Add to zone">&rsaquo;</button>
+                <button class="zone-btn" id="zone-rem-ch" type="button" title="Remove from zone">&lsaquo;</button>
+              </div>
+              <div class="zone-col">
+                <div class="zone-col-header">In Zone</div>
+                <div class="zone-list" id="zone-selected"></div>
+              </div>
+              <div class="zone-btns">
+                <button class="zone-btn" id="zone-up" type="button" title="Move up">&#8593;</button>
+                <button class="zone-btn" id="zone-dn" type="button" title="Move down">&#8595;</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Contact form -->
+      <div id="form-contact" class="edit-form hidden">
+        <div class="field-group">
+          <div class="field-group-title">Identity</div>
+          <div class="field-row">
+            <span class="field-label">Name</span>
+            <input type="text" id="ct-name" maxlength="16" class="field-input" placeholder="Contact name">
+          </div>
+          <div class="field-row">
+            <span class="field-label">Call Type</span>
+            <select id="ct-type" class="field-select">
+              <option value="Group">Group Call</option>
+              <option value="Private">Private Call</option>
+              <option value="All">All Call</option>
+            </select>
+          </div>
+          <div class="field-row">
+            <span class="field-label">TG / DMR ID</span>
+            <input type="number" id="ct-tg" min="1" max="16776415" class="field-input">
+          </div>
+        </div>
+        <div class="field-group">
+          <div class="checkbox-row">
+            <input type="checkbox" id="ct-ring">
+            <label for="ct-ring">Ring Alert</label>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /.modal-body -->
+    <div class="modal-footer">
+      <button class="btn-sm btn-sm-danger" id="modal-delete" type="button">Delete</button>
+      <div class="modal-spacer"></div>
+      <button class="btn-sm btn-sm-outline" id="modal-cancel" type="button">Cancel</button>
+      <button class="btn-sm btn-sm-primary" id="modal-save" type="button">Save</button>
+    </div>
+  </dialog>
+
   <script src="cps.js"></script>
   <script>
   'use strict';
 
   // ── State ──────────────────────────────────────────────────────────────────
 
-  let codeplug = null;  // CodeplugParser instance
+  let codeplug = null;
 
-  // ── Element refs ──────────────────────────────────────────────────────────
+  // ── DOM refs ──────────────────────────────────────────────────────────────
 
-  const fileInput    = document.getElementById('file-input');
-  const openBtn      = document.getElementById('open-btn');
-  const dropOpenBtn  = document.getElementById('drop-open-btn');
-  const saveBtn      = document.getElementById('save-btn');
-  const dropZone     = document.getElementById('drop-zone');
-  const emptyState   = document.getElementById('empty-state');
-  const tableArea    = document.getElementById('table-area');
+  const fileInput   = document.getElementById('file-input');
+  const openBtn     = document.getElementById('open-btn');
+  const dropOpenBtn = document.getElementById('drop-open-btn');
+  const saveBtn     = document.getElementById('save-btn');
+  const dropZone    = document.getElementById('drop-zone');
+  const emptyState  = document.getElementById('empty-state');
+  const tableArea   = document.getElementById('table-area');
 
-  const ibCallsign   = document.getElementById('ib-callsign');
-  const ibDmrId      = document.getElementById('ib-dmrid');
-  const ibFilename   = document.getElementById('ib-filename');
+  const ibCallsign  = document.getElementById('ib-callsign');
+  const ibDmrId     = document.getElementById('ib-dmrid');
+  const ibFilename  = document.getElementById('ib-filename');
 
-  const tabBtns      = document.querySelectorAll('.tab-btn');
-  const tabPanels    = { channels: document.getElementById('panel-channels'),
-                         zones:    document.getElementById('panel-zones'),
-                         contacts: document.getElementById('panel-contacts') };
+  const tabBtns   = document.querySelectorAll('.tab-btn');
+  const tabPanels = {
+    channels: document.getElementById('panel-channels'),
+    zones:    document.getElementById('panel-zones'),
+    contacts: document.getElementById('panel-contacts'),
+  };
+  const countEls = {
+    channels: document.getElementById('count-channels'),
+    zones:    document.getElementById('count-zones'),
+    contacts: document.getElementById('count-contacts'),
+  };
+  const rcEls = {
+    channels: document.getElementById('rc-channels'),
+    zones:    document.getElementById('rc-zones'),
+    contacts: document.getElementById('rc-contacts'),
+  };
+  const tbodies = {
+    channels: document.getElementById('tbody-channels'),
+    zones:    document.getElementById('tbody-zones'),
+    contacts: document.getElementById('tbody-contacts'),
+  };
+  const searches = {
+    channels: document.getElementById('search-channels'),
+    zones:    document.getElementById('search-zones'),
+    contacts: document.getElementById('search-contacts'),
+  };
 
-  const countEls     = { channels: document.getElementById('count-channels'),
-                         zones:    document.getElementById('count-zones'),
-                         contacts: document.getElementById('count-contacts') };
+  // Modal elements
+  const modal       = document.getElementById('edit-modal');
+  const modalTitle  = document.getElementById('modal-title');
+  const modalDelete = document.getElementById('modal-delete');
+  const modalSave   = document.getElementById('modal-save');
+  const modalCancel = document.getElementById('modal-cancel');
+  const modalClose  = document.getElementById('modal-close');
 
-  const rcEls        = { channels: document.getElementById('rc-channels'),
-                         zones:    document.getElementById('rc-zones'),
-                         contacts: document.getElementById('rc-contacts') };
-
-  const tbodies      = { channels: document.getElementById('tbody-channels'),
-                         zones:    document.getElementById('tbody-zones'),
-                         contacts: document.getElementById('tbody-contacts') };
-
-  const searches     = { channels: document.getElementById('search-channels'),
-                         zones:    document.getElementById('search-zones'),
-                         contacts: document.getElementById('search-contacts') };
+  const formChannel = document.getElementById('form-channel');
+  const formZone    = document.getElementById('form-zone');
+  const formContact = document.getElementById('form-contact');
 
   // ── File open ─────────────────────────────────────────────────────────────
 
@@ -204,24 +374,16 @@
   dropOpenBtn.addEventListener('click',() => fileInput.click());
   fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
 
-  dropZone.addEventListener('dragover', e => {
-    e.preventDefault();
-    dropZone.classList.add('dragover');
-  });
+  dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('dragover'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
   dropZone.addEventListener('drop', e => {
-    e.preventDefault();
-    dropZone.classList.remove('dragover');
-    const f = e.dataTransfer.files[0];
-    if (f) loadFile(f);
+    e.preventDefault(); dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
   });
-
-  // Also allow drag onto entire window when empty state is visible
   document.addEventListener('dragover', e => e.preventDefault());
   document.addEventListener('drop', e => {
     e.preventDefault();
-    const f = e.dataTransfer.files[0];
-    if (f && !codeplug) loadFile(f);
+    if (e.dataTransfer.files[0] && !codeplug) loadFile(e.dataTransfer.files[0]);
   });
 
   async function loadFile(file) {
@@ -242,119 +404,161 @@
 
   saveBtn.addEventListener('click', () => {
     if (!codeplug) return;
-    const buf  = codeplug.toArrayBuffer();
-    const blob = new Blob([buf], { type: 'application/octet-stream' });
+    const blob = new Blob([codeplug.toArrayBuffer()], { type: 'application/octet-stream' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
-    const base = (codeplug.filename || 'codeplug').replace(/\.(g77|cdmr)$/i, '');
     a.href     = url;
-    a.download = base + '.cdmr';
+    a.download = (codeplug.filename || 'codeplug').replace(/\.(g77|cdmr)$/i, '') + '.cdmr';
     a.click();
     URL.revokeObjectURL(url);
   });
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
 
-  tabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tab = btn.dataset.tab;
-      tabBtns.forEach(b => b.classList.toggle('active', b === btn));
-      Object.entries(tabPanels).forEach(([key, el]) => el.classList.toggle('active', key === tab));
-    });
-  });
+  tabBtns.forEach(btn => btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    tabBtns.forEach(b => b.classList.toggle('active', b === btn));
+    Object.entries(tabPanels).forEach(([k, el]) => el.classList.toggle('active', k === tab));
+  }));
 
-  // ── Search / filter ───────────────────────────────────────────────────────
+  // ── Search ────────────────────────────────────────────────────────────────
 
   Object.entries(searches).forEach(([key, el]) => {
-    el.addEventListener('input', () => filterTable(key, el.value.toLowerCase()));
+    el.addEventListener('input', () => applyFilter(key));
   });
 
-  function filterTable(tab, query) {
+  function applyFilter(tab) {
+    const q    = (searches[tab].value || '').toLowerCase();
     const rows = tbodies[tab].querySelectorAll('tr');
-    let visible = 0;
-    rows.forEach(row => {
-      const match = !query || row.textContent.toLowerCase().includes(query);
-      row.style.display = match ? '' : 'none';
-      if (match) visible++;
+    let vis    = 0;
+    rows.forEach(r => {
+      const show = !q || r.textContent.toLowerCase().includes(q);
+      r.style.display = show ? '' : 'none';
+      if (show) vis++;
     });
-    rcEls[tab].textContent = query ? `${visible} of ${rows.length}` : `${rows.length} rows`;
+    rcEls[tab].textContent = q ? `${vis} of ${rows.length}` : `${rows.length} rows`;
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Add buttons ───────────────────────────────────────────────────────────
+
+  document.getElementById('add-channel-btn').addEventListener('click', () => openModal('channel', null));
+  document.getElementById('add-zone-btn').addEventListener('click',    () => openModal('zone', null));
+  document.getElementById('add-contact-btn').addEventListener('click', () => openModal('contact', null));
+
+  // ── Render all ────────────────────────────────────────────────────────────
 
   function renderAll() {
     if (!codeplug) return;
-
-    // Info bar
     const gs = codeplug.generalSettings;
-    setInfoValue(ibCallsign, gs.radioName || '—');
-    setInfoValue(ibDmrId,    gs.dmrId     ? gs.dmrId.toString() : '—');
-    const fn = codeplug.filename || 'unknown';
-    ibFilename.textContent = fn;
-    ibFilename.className = 'filename-chip';
 
-    saveBtn.disabled = false;
+    // Info bar — make callsign and DMR ID click-to-edit
+    setInfoEditable(ibCallsign, gs.radioName || '—');
+    setInfoEditable(ibDmrId,    gs.dmrId ? gs.dmrId.toString() : '—');
+    ibFilename.textContent = codeplug.filename || 'unknown';
+    ibFilename.className   = 'filename-chip';
+    saveBtn.disabled       = false;
 
-    // Channels
-    const channels = codeplug.channels;
-    renderChannels(channels);
-    countEls.channels.textContent = channels.length;
-    rcEls.channels.textContent = channels.length + ' rows';
-
-    // Zones
-    const zones = codeplug.zones;
-    renderZones(zones, channels);
-    countEls.zones.textContent = zones.length;
-    rcEls.zones.textContent = zones.length + ' rows';
-
-    // Contacts
-    const contacts = codeplug.contacts;
-    renderContacts(contacts);
-    countEls.contacts.textContent = contacts.length;
-    rcEls.contacts.textContent = contacts.length + ' rows';
-
-    // Show table area
+    refreshChannels();
+    refreshZones();
+    refreshContacts();
     emptyState.classList.add('hidden');
     tableArea.classList.remove('hidden');
   }
 
-  function setInfoValue(el, text) {
-    el.textContent = text;
-    el.classList.remove('placeholder');
+  function refreshChannels() {
+    const channels = codeplug.channels;
+    renderChannels(channels);
+    countEls.channels.textContent = channels.length;
+    rcEls.channels.textContent    = channels.length + ' rows';
+    applyFilter('channels');
   }
+
+  function refreshZones() {
+    const zones = codeplug.zones;
+    renderZones(zones);
+    countEls.zones.textContent = zones.length;
+    rcEls.zones.textContent    = zones.length + ' rows';
+    applyFilter('zones');
+  }
+
+  function refreshContacts() {
+    const contacts = codeplug.contacts;
+    renderContacts(contacts);
+    countEls.contacts.textContent = contacts.length;
+    rcEls.contacts.textContent    = contacts.length + ' rows';
+    applyFilter('contacts');
+  }
+
+  // ── Info bar inline edit ──────────────────────────────────────────────────
+
+  function setInfoEditable(span, text) {
+    span.textContent = text;
+    span.className   = 'info-value editable';
+  }
+
+  function makeInfoEditable(span, maxLen, numericOnly, onSave) {
+    const original = span.textContent;
+    const input    = document.createElement('input');
+    input.type       = numericOnly ? 'number' : 'text';
+    input.maxLength  = maxLen;
+    input.value      = original === '—' ? '' : original;
+    input.className  = 'info-inline-edit';
+    span.replaceWith(input);
+    input.focus(); input.select();
+
+    function commit() {
+      const val = input.value.trim();
+      onSave(val);
+      input.replaceWith(span);
+    }
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { input.replaceWith(span); }
+    });
+  }
+
+  ibCallsign.addEventListener('click', () => {
+    if (!codeplug) return;
+    makeInfoEditable(ibCallsign, 8, false, val => {
+      const name = val.toUpperCase().substring(0, 8);
+      codeplug.writeGeneralSettings({ radioName: name, dmrId: codeplug.generalSettings.dmrId });
+      setInfoEditable(ibCallsign, name || '—');
+    });
+  });
+
+  ibDmrId.addEventListener('click', () => {
+    if (!codeplug) return;
+    makeInfoEditable(ibDmrId, 8, true, val => {
+      const id = parseInt(val, 10) || 0;
+      codeplug.writeGeneralSettings({ radioName: codeplug.generalSettings.radioName, dmrId: id });
+      setInfoEditable(ibDmrId, id ? id.toString() : '—');
+    });
+  });
 
   // ── Channel table ──────────────────────────────────────────────────────────
 
   function renderChannels(channels) {
-    const tbody = tbodies.channels;
+    const tbody   = tbodies.channels;
     tbody.innerHTML = '';
-
-    // Build contact lookup for quick name resolution
     let contacts = [];
     try { contacts = codeplug.contacts; } catch (_) {}
     const contactName = idx => (contacts[idx - 1] || {}).name || '';
 
     channels.forEach(ch => {
       const tr = document.createElement('tr');
+      tr.style.cursor = 'pointer';
+      tr.addEventListener('click', e => {
+        if (e.target.closest('.btn-row-delete')) return;
+        openModal('channel', ch);
+      });
 
       const tsCC = ch.mode === 'DMR'
-        ? `<span class="badge badge-ts">TS${ch.timeslot}</span> CC${ch.colorCode}`
-        : '—';
-
-      const bw = ch.mode === 'FM'
-        ? `<span class="badge">${ch.bandwidth}</span>`
-        : '—';
-
-      const tone = ch.css
-        ? `<span class="css-tone">${ch.css.kind}: ${ch.css.value}</span>`
-        : '—';
-
-      const flags = [];
-      if (ch.rxOnly) flags.push('<span class="badge badge-rxonly">RX</span>');
-
-      const contact = (ch.mode === 'DMR' && ch.contactIdx)
-        ? escHtml(contactName(ch.contactIdx))
-        : '—';
+        ? `<span class="badge badge-ts">TS${ch.timeslot}</span> CC${ch.colorCode}` : '—';
+      const bw   = ch.mode === 'FM' ? `<span class="badge">${ch.bandwidth}</span>` : '—';
+      const tone = ch.css ? `<span class="css-tone">${ch.css.kind}: ${ch.css.value}</span>` : '—';
+      const flags = ch.rxOnly ? '<span class="badge badge-rxonly">RX</span>' : '—';
+      const contact = (ch.mode === 'DMR' && ch.contactIdx) ? escHtml(contactName(ch.contactIdx)) : '—';
 
       tr.innerHTML = `
         <td class="col-num">${ch.number}</td>
@@ -366,38 +570,53 @@
         <td>${contact}</td>
         <td>${bw}</td>
         <td>${tone}</td>
-        <td>${flags.join(' ') || '—'}</td>
-      `;
+        <td>${flags}</td>
+        <td class="col-actions">
+          <button class="btn-row-delete" type="button" title="Delete channel">&#10005;</button>
+        </td>`;
+      tr.querySelector('.btn-row-delete').addEventListener('click', e => {
+        e.stopPropagation();
+        if (!confirm(`Delete channel "${ch.name}"?`)) return;
+        codeplug.deleteChannel(ch.slotIndex);
+        refreshChannels();
+      });
       tbody.appendChild(tr);
     });
   }
 
   // ── Zone table ────────────────────────────────────────────────────────────
 
-  function renderZones(zones, channels) {
-    const tbody = tbodies.zones;
+  function renderZones(zones) {
+    const tbody    = tbodies.zones;
     tbody.innerHTML = '';
-
-    const chName = idx => {
-      const ch = channels.find(c => c.number === idx);
-      return ch ? ch.name : `CH${idx}`;
-    };
+    const channels = codeplug.channels;
+    const chName   = idx => { const c = channels.find(x => x.number === idx); return c ? c.name : `CH${idx}`; };
 
     zones.forEach(zone => {
       const tr = document.createElement('tr');
-      const pills = zone.channels.slice(0, 30).map(idx =>
-        `<span class="ch-pill">${escHtml(chName(idx))}</span>`
-      ).join('');
-      const overflow = zone.channels.length > 30
-        ? `<span class="ch-pill">+${zone.channels.length - 30} more</span>`
-        : '';
+      tr.style.cursor = 'pointer';
+      tr.addEventListener('click', e => {
+        if (e.target.closest('.btn-row-delete')) return;
+        openModal('zone', zone);
+      });
+
+      const pills    = zone.channels.slice(0, 20).map(i => `<span class="ch-pill">${escHtml(chName(i))}</span>`).join('');
+      const overflow = zone.channels.length > 20 ? `<span class="ch-pill">+${zone.channels.length - 20} more</span>` : '';
 
       tr.innerHTML = `
         <td class="col-num">${zone.number}</td>
         <td class="col-name">${escHtml(zone.name)}</td>
         <td>${zone.channels.length}</td>
         <td><div class="zone-channels">${pills}${overflow}</div></td>
-      `;
+        <td class="col-actions">
+          <button class="btn-row-delete" type="button" title="Delete zone">&#10005;</button>
+        </td>`;
+      tr.querySelector('.btn-row-delete').addEventListener('click', e => {
+        e.stopPropagation();
+        if (!confirm(`Delete zone "${zone.name}"?`)) return;
+        codeplug.deleteZone(zone.slotIndex);
+        refreshZones();
+      });
       tbody.appendChild(tr);
     });
   }
@@ -405,11 +624,17 @@
   // ── Contact table ──────────────────────────────────────────────────────────
 
   function renderContacts(contacts) {
-    const tbody = tbodies.contacts;
+    const tbody    = tbodies.contacts;
     tbody.innerHTML = '';
 
     contacts.forEach(ct => {
       const tr = document.createElement('tr');
+      tr.style.cursor = 'pointer';
+      tr.addEventListener('click', e => {
+        if (e.target.closest('.btn-row-delete')) return;
+        openModal('contact', ct);
+      });
+
       const typeClass = ct.callType.toLowerCase();
       tr.innerHTML = `
         <td class="col-num">${ct.number}</td>
@@ -417,19 +642,255 @@
         <td><span class="badge badge-${typeClass}">${ct.callType}</span></td>
         <td class="col-mono">${ct.tgNumber}</td>
         <td>${ct.ringAlert ? '&#9679;' : '—'}</td>
-      `;
+        <td class="col-actions">
+          <button class="btn-row-delete" type="button" title="Delete contact">&#10005;</button>
+        </td>`;
+      tr.querySelector('.btn-row-delete').addEventListener('click', e => {
+        e.stopPropagation();
+        if (!confirm(`Delete contact "${ct.name}"?`)) return;
+        codeplug.deleteContact(ct.slotIndex);
+        refreshContacts();
+      });
       tbody.appendChild(tr);
     });
+  }
+
+  // ── Modal management ──────────────────────────────────────────────────────
+
+  let editState = null; // { type, obj } — obj is null for new
+
+  modalClose.addEventListener('click',  closeModal);
+  modalCancel.addEventListener('click', closeModal);
+  modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+
+  modalDelete.addEventListener('click', () => {
+    if (!editState || editState.obj === null) return;
+    const { type, obj } = editState;
+    const label = type === 'channel' ? obj.name : type === 'zone' ? obj.name : obj.name;
+    if (!confirm(`Delete ${type} "${label}"?`)) return;
+    if      (type === 'channel') { codeplug.deleteChannel(obj.slotIndex); refreshChannels(); }
+    else if (type === 'zone')    { codeplug.deleteZone(obj.slotIndex);    refreshZones();    }
+    else if (type === 'contact') { codeplug.deleteContact(obj.slotIndex); refreshContacts(); }
+    closeModal();
+  });
+
+  modalSave.addEventListener('click', () => {
+    if (!editState) return;
+    if      (editState.type === 'channel') saveChannel();
+    else if (editState.type === 'zone')    saveZone();
+    else if (editState.type === 'contact') saveContact();
+  });
+
+  function openModal(type, obj) {
+    editState = { type, obj };
+    formChannel.classList.add('hidden');
+    formZone.classList.add('hidden');
+    formContact.classList.add('hidden');
+    modalDelete.style.display = obj ? '' : 'none';
+
+    if (type === 'channel') {
+      modalTitle.textContent = obj ? `Edit Channel: ${obj.name}` : 'New Channel';
+      formChannel.classList.remove('hidden');
+      populateChannelForm(obj);
+    } else if (type === 'zone') {
+      modalTitle.textContent = obj ? `Edit Zone: ${obj.name}` : 'New Zone';
+      formZone.classList.remove('hidden');
+      populateZoneForm(obj);
+    } else if (type === 'contact') {
+      modalTitle.textContent = obj ? `Edit Contact: ${obj.name}` : 'New Contact';
+      formContact.classList.remove('hidden');
+      populateContactForm(obj);
+    }
+    modal.showModal();
+  }
+
+  function closeModal() {
+    modal.close();
+    editState = null;
+  }
+
+  // ── Channel form ──────────────────────────────────────────────────────────
+
+  document.getElementById('ch-mode').addEventListener('change', syncChannelModeFields);
+
+  function syncChannelModeFields() {
+    const isDMR = document.getElementById('ch-mode').value === 'DMR';
+    document.getElementById('ch-dmr-fields').classList.toggle('hidden', !isDMR);
+    document.getElementById('ch-fm-fields').classList.toggle('hidden',  isDMR);
+  }
+
+  function populateChannelForm(ch) {
+    document.getElementById('ch-name').value    = ch ? ch.name    : '';
+    document.getElementById('ch-mode').value    = ch ? ch.mode    : 'FM';
+    document.getElementById('ch-rxfreq').value  = ch ? ch.rxMHz   : '';
+    document.getElementById('ch-txfreq').value  = ch ? ch.txMHz   : '';
+    document.getElementById('ch-timeslot').value = ch && ch.timeslot ? ch.timeslot : 1;
+    document.getElementById('ch-cc').value      = ch && ch.colorCode != null ? ch.colorCode : 0;
+    document.getElementById('ch-bw').value      = ch && ch.bandwidth ? ch.bandwidth : '12.5K';
+    document.getElementById('ch-csstx').value   = ch ? ch.cssStr  : '';
+    document.getElementById('ch-rxonly').checked = ch ? ch.rxOnly : false;
+
+    // Populate contact dropdown from current contacts list
+    const sel = document.getElementById('ch-contact');
+    sel.innerHTML = '<option value="0">— None —</option>';
+    (codeplug ? codeplug.contacts : []).forEach(ct => {
+      const opt = document.createElement('option');
+      opt.value       = ct.number;
+      opt.textContent = `${ct.number}: ${ct.name}`;
+      sel.appendChild(opt);
+    });
+    sel.value = ch && ch.contactIdx ? ch.contactIdx : 0;
+
+    syncChannelModeFields();
+  }
+
+  function saveChannel() {
+    let slotIndex = editState.obj ? editState.obj.slotIndex : null;
+    if (slotIndex === null) {
+      slotIndex = codeplug.addChannel();
+      if (slotIndex === null) { alert('No free channel slots available (maximum 128 reached).'); return; }
+    }
+    const mode = document.getElementById('ch-mode').value;
+    codeplug.writeChannel({
+      slotIndex,
+      name:       document.getElementById('ch-name').value.substring(0, 16),
+      mode,
+      rxMHz:      document.getElementById('ch-rxfreq').value,
+      txMHz:      document.getElementById('ch-txfreq').value,
+      timeslot:   parseInt(document.getElementById('ch-timeslot').value, 10),
+      colorCode:  parseInt(document.getElementById('ch-cc').value, 10) & 0x0F,
+      contactIdx: parseInt(document.getElementById('ch-contact').value, 10),
+      bandwidth:  document.getElementById('ch-bw').value,
+      cssStr:     document.getElementById('ch-csstx').value,
+      rxOnly:     document.getElementById('ch-rxonly').checked,
+    });
+    closeModal();
+    refreshChannels();
+  }
+
+  // ── Zone form ─────────────────────────────────────────────────────────────
+
+  let zoneAvailSel  = null;
+  let zoneInZoneSel = null;
+  let zoneChList    = [];
+
+  document.getElementById('zone-add-ch').addEventListener('click', () => {
+    if (zoneAvailSel === null) return;
+    if (zoneChList.length >= 80) { alert('Zone is full (maximum 80 channels).'); return; }
+    zoneChList.push(zoneAvailSel);
+    zoneInZoneSel = zoneAvailSel;
+    zoneAvailSel  = null;
+    renderZoneEditor();
+  });
+
+  document.getElementById('zone-rem-ch').addEventListener('click', () => {
+    if (zoneInZoneSel === null) return;
+    const idx = zoneChList.indexOf(zoneInZoneSel);
+    if (idx >= 0) zoneChList.splice(idx, 1);
+    zoneInZoneSel = null;
+    renderZoneEditor();
+  });
+
+  document.getElementById('zone-up').addEventListener('click', () => {
+    if (zoneInZoneSel === null) return;
+    const idx = zoneChList.indexOf(zoneInZoneSel);
+    if (idx > 0) { [zoneChList[idx-1], zoneChList[idx]] = [zoneChList[idx], zoneChList[idx-1]]; renderZoneEditor(); }
+  });
+
+  document.getElementById('zone-dn').addEventListener('click', () => {
+    if (zoneInZoneSel === null) return;
+    const idx = zoneChList.indexOf(zoneInZoneSel);
+    if (idx >= 0 && idx < zoneChList.length - 1) {
+      [zoneChList[idx], zoneChList[idx+1]] = [zoneChList[idx+1], zoneChList[idx]];
+      renderZoneEditor();
+    }
+  });
+
+  function populateZoneForm(zone) {
+    document.getElementById('zone-name').value = zone ? zone.name : '';
+    zoneChList    = zone ? [...zone.channels] : [];
+    zoneAvailSel  = null;
+    zoneInZoneSel = null;
+    renderZoneEditor();
+  }
+
+  function renderZoneEditor() {
+    const all        = codeplug ? codeplug.channels : [];
+    const inZoneSet  = new Set(zoneChList);
+    const availEl    = document.getElementById('zone-avail');
+    const selectedEl = document.getElementById('zone-selected');
+
+    availEl.innerHTML    = '';
+    selectedEl.innerHTML = '';
+
+    all.filter(ch => !inZoneSet.has(ch.number)).forEach(ch => {
+      const div = document.createElement('div');
+      div.className    = 'zone-list-item' + (ch.number === zoneAvailSel ? ' selected' : '');
+      div.textContent  = `${ch.number}: ${ch.name}`;
+      div.dataset.num  = ch.number;
+      div.addEventListener('click', () => { zoneAvailSel = ch.number; zoneInZoneSel = null; renderZoneEditor(); });
+      availEl.appendChild(div);
+    });
+
+    zoneChList.forEach(num => {
+      const ch  = all.find(x => x.number === num);
+      const div = document.createElement('div');
+      div.className    = 'zone-list-item' + (num === zoneInZoneSel ? ' selected' : '');
+      div.textContent  = ch ? `${ch.number}: ${ch.name}` : `CH${num}`;
+      div.dataset.num  = num;
+      div.addEventListener('click', () => { zoneInZoneSel = num; zoneAvailSel = null; renderZoneEditor(); });
+      selectedEl.appendChild(div);
+    });
+  }
+
+  function saveZone() {
+    let slotIndex = editState.obj ? editState.obj.slotIndex : null;
+    if (slotIndex === null) {
+      slotIndex = codeplug.addZone();
+      if (slotIndex === null) { alert('No free zone slots available (maximum 68 reached).'); return; }
+    }
+    codeplug.writeZone({
+      slotIndex,
+      name:     document.getElementById('zone-name').value.substring(0, 16),
+      channels: [...zoneChList],
+    });
+    closeModal();
+    refreshZones();
+  }
+
+  // ── Contact form ──────────────────────────────────────────────────────────
+
+  function populateContactForm(ct) {
+    document.getElementById('ct-name').value  = ct ? ct.name      : '';
+    document.getElementById('ct-type').value  = ct ? ct.callType  : 'Group';
+    document.getElementById('ct-tg').value    = ct ? ct.tgNumber  : '';
+    document.getElementById('ct-ring').checked = ct ? ct.ringAlert : false;
+  }
+
+  function saveContact() {
+    let slotIndex = editState.obj ? editState.obj.slotIndex : null;
+    if (slotIndex === null) {
+      slotIndex = codeplug.addContact();
+      if (slotIndex === null) { alert('Contact list is full.'); return; }
+    }
+    const tg = parseInt(document.getElementById('ct-tg').value, 10) || 0;
+    if (!tg) { alert('TG / DMR ID must be a positive number.'); return; }
+    codeplug.writeContact({
+      slotIndex,
+      name:       document.getElementById('ct-name').value.substring(0, 16),
+      callType:   document.getElementById('ct-type').value,
+      tgNumber:   tg,
+      ringAlert:  document.getElementById('ct-ring').checked,
+    });
+    closeModal();
+    refreshContacts();
   }
 
   // ── Util ──────────────────────────────────────────────────────────────────
 
   function escHtml(str) {
     return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   </script>
