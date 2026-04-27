@@ -141,7 +141,8 @@ modelSelect.addEventListener('change', () => {
   if (!val) return;
   state.model = val;
   markComplete(cardModel, 'step-num-1');
-  unlock(cardDonor);
+  unlock(cardConnect);
+  connectBtn.disabled = false;
   updateFlashSummary();
 });
 
@@ -183,9 +184,9 @@ function handleDonorFile(file) {
   const reader = new FileReader();
   reader.onload = e => {
     state.donorBytes = new Uint8Array(e.target.result);
-    markComplete(cardDonor, 'step-num-2');
-    unlock(cardConnect);
-    connectBtn.disabled = false;
+    markComplete(cardDonor, 'step-num-4');
+    unlock(cardFlash);
+    flashBtn.disabled = false;
     updateFlashSummary();
   };
   reader.readAsArrayBuffer(file);
@@ -200,11 +201,10 @@ connectBtn.addEventListener('click', async () => {
     state.device = await connectUSB();
     const name = state.device.productName || 'Radio in flash mode';
     setStatus(connectStatus, `Connected: ${name}`, 'success');
-    markComplete(cardConnect, 'step-num-3');
+    markComplete(cardConnect, 'step-num-2');
     unlock(cardBackup);
     backupBtn.disabled = false;
-    unlock(cardFlash);
-    flashBtn.disabled = false;
+    unlock(cardDonor);
     updateFlashSummary();
   } catch (err) {
     connectBtn.disabled = false;
@@ -236,7 +236,7 @@ flashBtn.addEventListener('click', async () => {
       'Done! Firmware flashed successfully. Unplug the cable and power on your radio.',
       'success'
     );
-    markComplete(cardFlash, 'step-num-4');
+    markComplete(cardFlash, 'step-num-5');
   } catch (err) {
     setStatus(flashStatus, `Flash failed: ${err.message}`, 'error');
     flashBtn.disabled = false;
@@ -260,7 +260,7 @@ backupBtn.addEventListener('click', async () => {
     backupProgressBar.style.width   = '100%';
     backupProgressLabel.textContent = '100%';
     setStatus(backupStatus, `Backup saved — ${formatBytes(data.length)}.`, 'success');
-    markComplete(cardBackup, 'backup-badge');
+    markComplete(cardBackup, 'step-num-3');
   } catch (err) {
     setStatus(backupStatus, `Backup failed: ${err.message}`, 'error');
     backupBtn.disabled = false;

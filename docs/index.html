@@ -56,10 +56,87 @@
       </div>
     </div>
 
-    <!-- Step 2: Donor file -->
-    <div class="step-card locked" id="card-donor">
+    <!-- Windows driver notice (shown before step 2 on Windows only) -->
+    <div class="notice-card hidden" id="card-windows-driver">
+      <div class="notice-header">
+        <span class="notice-icon">&#9881;</span>
+        <h2>Windows: One-Time Driver Setup</h2>
+      </div>
+      <div class="notice-body">
+        <p>
+          Windows ships with a default STM32 DFU driver that blocks WebUSB access.
+          You need to swap it for <strong>WinUSB</strong> using a free tool called
+          <a href="https://zadig.akeo.ie" target="_blank" rel="noopener">Zadig</a>.
+          This is a one-time step &mdash; future flashes will work without repeating it.
+        </p>
+        <ol>
+          <li>Put your radio into DFU mode using the instructions in Step 2 below, then come back here.</li>
+          <li>Download and run <a href="https://zadig.akeo.ie" target="_blank" rel="noopener">Zadig</a>.</li>
+          <li>In Zadig, click <strong>Options &rarr; List All Devices</strong>.</li>
+          <li>Select <strong>Digital Radio in USB mode</strong> from the device dropdown.</li>
+          <li>Use the up/down arrows to select <strong>WinUSB (v6.1.7600.16385)</strong>, then click <strong>Replace Driver</strong>.</li>
+          <li>Once the driver installs, return here and click Connect in Step 2.</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Step 2: Connect radio -->
+    <div class="step-card locked" id="card-connect">
       <div class="step-header">
         <span class="step-number" id="step-num-2">2</span>
+        <h2>Connect Your Radio</h2>
+      </div>
+      <div class="step-body">
+        <div class="info-box">
+          <h3>Put your radio in flash mode first</h3>
+          <ol>
+            <li>Make sure the radio is connected to your computer via USB.</li>
+            <li>Turn the radio <strong>off</strong>.</li>
+            <li>Hold <strong>PTT + SK1</strong> (the two side buttons) simultaneously.</li>
+            <li>While holding both buttons, turn the radio on.</li>
+            <li>The LED will flash <strong>red/green</strong> &mdash; that confirms the radio is in DFU mode.</li>
+          </ol>
+        </div>
+        <button class="btn btn-primary" id="connect-btn" type="button" disabled>
+          Connect Radio via USB
+        </button>
+        <p id="connect-status" class="status-text"></p>
+      </div>
+    </div>
+
+    <!-- Step 3: Back up current firmware (optional) -->
+    <div class="step-card locked" id="card-backup">
+      <div class="step-header">
+        <span class="step-number" id="step-num-3">3</span>
+        <h2>Back Up Current Firmware</h2>
+        <span class="opt-badge" id="backup-badge">Optional</span>
+      </div>
+      <div class="step-body">
+        <div class="info-box">
+          <h3>Recommended before your first flash</h3>
+          <p>
+            This reads your radio's current firmware over USB and saves it as a .bin file.
+            If you ever need to restore the original firmware, you can flash this backup
+            straight back using this tool.
+          </p>
+        </div>
+        <button class="btn btn-outline" id="backup-btn" type="button" disabled>
+          Read &amp; Download Backup
+        </button>
+        <div class="progress-area hidden" id="backup-progress-area">
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="backup-progress-bar"></div>
+          </div>
+          <p id="backup-progress-label" class="progress-label">0%</p>
+        </div>
+        <p id="backup-status" class="status-text"></p>
+      </div>
+    </div>
+
+    <!-- Step 4: Donor file -->
+    <div class="step-card locked" id="card-donor">
+      <div class="step-header">
+        <span class="step-number" id="step-num-4">4</span>
         <h2>Provide Donor Firmware</h2>
       </div>
       <div class="step-body">
@@ -89,86 +166,10 @@
       </div>
     </div>
 
-    <!-- Windows driver notice (injected before step 3 on Windows only) -->
-    <div class="notice-card hidden" id="card-windows-driver">
-      <div class="notice-header">
-        <span class="notice-icon">&#9881;</span>
-        <h2>Windows: One-Time Driver Setup</h2>
-      </div>
-      <div class="notice-body">
-        <p>
-          Windows ships with a default STM32 DFU driver that blocks WebUSB access.
-          You need to swap it for <strong>WinUSB</strong> using a free tool called
-          <a href="https://zadig.akeo.ie" target="_blank" rel="noopener">Zadig</a>.
-          This is a one-time step &mdash; future flashes will work without repeating it.
-        </p>
-        <ol>
-          <li>Put your radio into DFU mode using the instructions in Step 3 below, then come back here.</li>
-          <li>Download and run <a href="https://zadig.akeo.ie" target="_blank" rel="noopener">Zadig</a>.</li>
-          <li>In Zadig, click <strong>Options &rarr; List All Devices</strong>.</li>
-          <li>Select <strong>Digital Radio in USB mode</strong> from the device dropdown.</li>
-          <li>Use the up/down arrows to select <strong>WinUSB (v6.1.7600.16385)</strong>, then click <strong>Replace Driver</strong>.</li>
-          <li>Once the driver installs, return here and click Connect in Step 3.</li>
-        </ol>
-      </div>
-    </div>
-
-    <!-- Step 3: Connect radio -->
-    <div class="step-card locked" id="card-connect">
-      <div class="step-header">
-        <span class="step-number" id="step-num-3">3</span>
-        <h2>Connect Your Radio</h2>
-      </div>
-      <div class="step-body">
-        <div class="info-box">
-          <h3>Put your radio in flash mode first</h3>
-          <ol>
-            <li>Make sure the radio is connected to your computer via USB.</li>
-            <li>Turn the radio <strong>off</strong>.</li>
-            <li>Hold <strong>PTT + SK1</strong> (the two side buttons) simultaneously.</li>
-            <li>While holding both buttons, turn the radio on.</li>
-            <li>The LED will flash <strong>red/green</strong> &mdash; that confirms the radio is in DFU mode.</li>
-          </ol>
-        </div>
-        <button class="btn btn-primary" id="connect-btn" type="button" disabled>
-          Connect Radio via USB
-        </button>
-        <p id="connect-status" class="status-text"></p>
-      </div>
-    </div>
-
-    <!-- Backup — optional, unlocked after connect -->
-    <div class="step-card locked" id="card-backup">
-      <div class="step-header">
-        <span class="opt-badge" id="backup-badge">Optional</span>
-        <h2>Back Up Current Firmware</h2>
-      </div>
-      <div class="step-body">
-        <div class="info-box">
-          <h3>Recommended before your first flash</h3>
-          <p>
-            This reads your radio's current firmware over USB and saves it as a .bin file.
-            If you ever need to restore the original firmware, you can flash this backup
-            straight back using this tool.
-          </p>
-        </div>
-        <button class="btn btn-outline" id="backup-btn" type="button" disabled>
-          Read &amp; Download Backup
-        </button>
-        <div class="progress-area hidden" id="backup-progress-area">
-          <div class="progress-bar-track">
-            <div class="progress-bar-fill" id="backup-progress-bar"></div>
-          </div>
-          <p id="backup-progress-label" class="progress-label">0%</p>
-        </div>
-        <p id="backup-status" class="status-text"></p>
-      </div>
-    </div>
-
-    <!-- Step 4: Flash -->
+    <!-- Step 5: Flash -->
     <div class="step-card locked" id="card-flash">
       <div class="step-header">
-        <span class="step-number" id="step-num-4">4</span>
+        <span class="step-number" id="step-num-5">5</span>
         <h2>Flash Firmware</h2>
       </div>
       <div class="step-body">

@@ -567,6 +567,8 @@ main.container {
 }
 
 /* ─── Optional-step badge ─────────────────────────────────────────────────── */
+.step-header .opt-badge { margin-left: auto; }
+
 .opt-badge {
   display: flex;
   align-items: center;
