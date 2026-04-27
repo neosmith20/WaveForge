@@ -2,27 +2,27 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --blue:        #2563eb;
-  --blue-dark:   #1d4ed8;
-  --blue-tint:   #eff6ff;
-  --green:       #16a34a;
-  --green-tint:  #f0fdf4;
-  --green-border:#bbf7d0;
-  --yellow-bg:   #fef3c7;
-  --yellow-border:#fcd34d;
-  --yellow-text: #92400e;
-  --red:         #dc2626;
-  --bg:          #f1f5f9;
-  --surface:     #ffffff;
-  --border:      #e2e8f0;
-  --text:        #1e293b;
-  --muted:       #64748b;
-  --locked-bg:   #f8fafc;
-  --locked-text: #94a3b8;
+  --blue:        #3b82f6;
+  --blue-dark:   #2563eb;
+  --blue-tint:   #1b3560;
+  --green:       #22c55e;
+  --green-tint:  rgba(34,197,94,.1);
+  --green-border:rgba(34,197,94,.3);
+  --yellow-bg:   #1c1503;
+  --yellow-border:#713f12;
+  --yellow-text: #fde68a;
+  --red:         #f87171;
+  --bg:          #0f172a;
+  --surface:     #1e293b;
+  --border:      #2d4060;
+  --text:        #e2e8f0;
+  --muted:       #94a3b8;
+  --locked-bg:   #141e2e;
+  --locked-text: #3d5470;
   --header-bg:   #0f172a;
   --radius:      12px;
-  --shadow:      0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
-  --shadow-md:   0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.06);
+  --shadow:      0 1px 3px rgba(0,0,0,.3), 0 1px 2px rgba(0,0,0,.2);
+  --shadow-md:   0 4px 6px rgba(0,0,0,.35), 0 2px 4px rgba(0,0,0,.25);
 }
 
 body {
@@ -61,9 +61,8 @@ a:hover { color: var(--blue-dark); }
 /* ─── Header ──────────────────────────────────────────────────────────────── */
 .site-header {
   background: var(--header-bg);
-  padding: 36px 0 30px;
+  padding: 36px 0 24px;
   text-align: center;
-  border-bottom: 3px solid var(--blue);
   flex-shrink: 0;
 }
 
@@ -111,8 +110,8 @@ main.container {
 
 /* ─── Windows driver notice ───────────────────────────────────────────────── */
 .notice-card {
-  background: #fffbeb;
-  border: 1px solid #fcd34d;
+  background: #1c1503;
+  border: 1px solid #713f12;
   border-left: 4px solid #d97706;
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -124,20 +123,20 @@ main.container {
   align-items: center;
   gap: 12px;
   padding: 16px 24px;
-  border-bottom: 1px solid #fde68a;
-  background: #fef3c7;
+  border-bottom: 1px solid #713f12;
+  background: #231a07;
 }
 
 .notice-icon {
   font-size: 1.2rem;
-  color: #d97706;
+  color: #f59e0b;
   flex-shrink: 0;
 }
 
 .notice-header h2 {
   font-size: 1.05rem;
   font-weight: 600;
-  color: #92400e;
+  color: #fcd34d;
 }
 
 .notice-body {
@@ -149,7 +148,7 @@ main.container {
 
 .notice-body p {
   font-size: 0.875rem;
-  color: #78350f;
+  color: #fde68a;
   line-height: 1.65;
 }
 
@@ -159,13 +158,13 @@ main.container {
   flex-direction: column;
   gap: 7px;
   font-size: 0.875rem;
-  color: #78350f;
+  color: #fde68a;
   line-height: 1.65;
 }
 
-.notice-body strong { color: #92400e; font-weight: 600; }
-.notice-body a { color: #92400e; font-weight: 600; }
-.notice-body a:hover { color: #78350f; }
+.notice-body strong { color: #fef08a; font-weight: 600; }
+.notice-body a { color: #fcd34d; font-weight: 600; }
+.notice-body a:hover { color: #fef08a; }
 
 /* ─── Step cards ──────────────────────────────────────────────────────────── */
 .step-card {
@@ -194,7 +193,7 @@ main.container {
   gap: 14px;
   padding: 18px 24px;
   border-bottom: 1px solid var(--border);
-  background: #fafbfd;
+  background: #192235;
 }
 
 .step-card.locked .step-header {
@@ -294,7 +293,7 @@ main.container {
 
 /* ─── Info box ────────────────────────────────────────────────────────────── */
 .info-box {
-  background: #f8fafc;
+  background: #162234;
   border: 1px solid var(--border);
   border-left: 4px solid var(--blue);
   border-radius: 8px;
@@ -328,7 +327,8 @@ main.container {
 .info-box strong { color: var(--text); font-weight: 600; }
 
 .info-box code {
-  background: var(--border);
+  background: rgba(255,255,255,.08);
+  color: #93c5fd;
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 0.85em;
@@ -372,7 +372,7 @@ main.container {
   border-radius: 8px;
   padding: 14px 18px;
   font-size: 0.875rem;
-  color: #166534;
+  color: #86efac;
   line-height: 2;
 }
 
@@ -415,7 +415,7 @@ main.container {
 }
 
 .btn-outline {
-  background: #fff;
+  background: transparent;
   color: var(--blue);
   border-color: var(--blue);
 }
@@ -535,8 +535,8 @@ main.container {
 
 /* ─── Site navigation ─────────────────────────────────────────────────────── */
 .site-nav {
-  background: #162035;
-  border-bottom: 1px solid rgba(255,255,255,.07);
+  background: var(--header-bg);
+  border-bottom: 3px solid var(--blue);
   flex-shrink: 0;
 }
 
@@ -552,19 +552,18 @@ main.container {
   text-decoration: none;
   font-size: 0.875rem;
   font-weight: 500;
-  border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  transition: color 0.15s, background 0.15s;
 }
 
 .nav-link:hover {
   color: #e2e8f0;
-  background: rgba(255,255,255,.05);
-  border-bottom-color: #475569;
+  background: rgba(255,255,255,.06);
 }
 
 .nav-link.active {
   color: #fff;
-  border-bottom-color: var(--blue);
+  font-weight: 600;
+  background: rgba(255,255,255,.06);
 }
 
 /* ─── Optional-step badge ─────────────────────────────────────────────────── */
@@ -572,11 +571,12 @@ main.container {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 12px;
-  background: #0891b2;
-  color: #fff;
+  padding: 5px 14px;
+  background: #0e7490;
+  color: #cffafe;
+  border: 1px solid #22d3ee;
   border-radius: 100px;
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.6px;
@@ -584,8 +584,8 @@ main.container {
   transition: background 0.2s;
 }
 
-#card-backup.complete .opt-badge { background: var(--green); }
-#card-backup.locked   .opt-badge { background: var(--locked-text); }
+#card-backup.complete .opt-badge { background: #15803d; color: #bbf7d0; border-color: var(--green); }
+#card-backup.locked   .opt-badge { background: transparent; color: var(--locked-text); border-color: var(--locked-text); }
 
 /* ─── Setup guide & About pages ───────────────────────────────────────────── */
 .guide-main {
@@ -616,7 +616,7 @@ main.container {
 /* Guide cards reuse step-card structure; override header bg for variety */
 .guide-card { }
 
-.guide-card .step-header { background: #fafbfd; }
+.guide-card .step-header { background: #192235; }
 
 .guide-card .step-body p {
   font-size: 0.875rem;
@@ -646,7 +646,8 @@ main.container {
 .guide-card .step-body li strong { color: var(--text); }
 
 .guide-card .step-body code {
-  background: var(--border);
+  background: rgba(255,255,255,.08);
+  color: #93c5fd;
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 0.85em;
@@ -655,12 +656,12 @@ main.container {
 
 .guide-tip {
   background: var(--blue-tint);
-  border: 1px solid #bfdbfe;
+  border: 1px solid rgba(59,130,246,.25);
   border-left: 4px solid var(--blue);
   border-radius: 8px;
   padding: 12px 16px;
   font-size: 0.85rem;
-  color: #1e40af;
+  color: #93c5fd;
   line-height: 1.6;
 }
 
