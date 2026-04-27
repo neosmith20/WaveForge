@@ -99,7 +99,7 @@ const cardDonor    = document.getElementById('card-donor');
 const cardConnect  = document.getElementById('card-connect');
 const cardFlash    = document.getElementById('card-flash');
 
-const radioBtns      = document.querySelectorAll('.radio-btn');
+const modelSelect    = document.getElementById('model-select');
 const donorPickBtn   = document.getElementById('donor-pick-btn');
 const donorFileInput = document.getElementById('donor-file-input');
 const donorDropArea  = document.getElementById('donor-drop-area');
@@ -128,23 +128,21 @@ const browserBanner = document.getElementById('browser-banner');
 function checkBrowser() {
   if (typeof navigator.usb === 'undefined') {
     browserBanner.classList.remove('hidden');
-    connectBtn.disabled = true;
-    flashBtn.disabled   = true;
+    connectBtn.disabled   = true;
+    flashBtn.disabled     = true;
     donorPickBtn.disabled = true;
-    radioBtns.forEach(b => b.disabled = true);
+    modelSelect.disabled  = true;
   }
 }
 
 // ─── Step 1: Radio model ──────────────────────────────────────────────────────
-radioBtns.forEach(btn => {
-  btn.addEventListener('click', () => {
-    radioBtns.forEach(b => b.classList.remove('selected'));
-    btn.classList.add('selected');
-    state.model = btn.dataset.model;
-    markComplete(cardModel, 'step-num-1');
-    unlock(cardDonor);
-    updateFlashSummary();
-  });
+modelSelect.addEventListener('change', () => {
+  const val = modelSelect.value;
+  if (!val) return;
+  state.model = val;
+  markComplete(cardModel, 'step-num-1');
+  unlock(cardDonor);
+  updateFlashSummary();
 });
 
 // ─── Step 2: Donor file ───────────────────────────────────────────────────────

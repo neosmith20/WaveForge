@@ -17,7 +17,7 @@
   <header class="site-header">
     <div class="container">
       <div class="brand">
-        <span class="brand-name">ClearDMR</span>
+        <a href="index.html" class="brand-link"><span class="brand-name">ClearDMR</span></a>
         <span class="brand-badge">Web Flasher</span>
       </div>
       <p class="brand-tagline">
@@ -45,19 +45,13 @@
         <h2>Select Your Radio</h2>
       </div>
       <div class="step-body">
-        <div class="radio-grid">
-          <button class="radio-btn" data-model="DM1701" type="button">
-            <strong>Baofeng DM-1701</strong>
-            <span>Dual-band DMR / FM handheld</span>
-          </button>
-          <button class="radio-btn" data-model="MDUV380" type="button">
-            <strong>TYT MD-UV380</strong>
-            <span>Dual-band DMR / FM handheld</span>
-          </button>
-          <button class="radio-btn" data-model="RT84" type="button">
-            <strong>Retevis RT84</strong>
-            <span>Dual-band DMR / FM handheld</span>
-          </button>
+        <div class="select-wrap">
+          <select id="model-select" class="radio-select">
+            <option value="">— choose your radio —</option>
+            <option value="DM1701">Baofeng DM-1701</option>
+            <option value="MDUV380">TYT MD-UV380</option>
+            <option value="RT84">Retevis RT84</option>
+          </select>
         </div>
       </div>
     </div>
