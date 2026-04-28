@@ -1,172 +1,170 @@
 'use strict';
 
-// STM32 DFU ROM bootloader — same USB identifiers as the firmware flasher
-const CPWR_FILTERS = [{ vendorId: 0x0483, productId: 0xDF11 }];
+// ClearDMR Web CPS — Write to Radio via USB CDC (normal operating mode)
+//
+// The firmware exposes a proprietary CDC protocol when running normally.
+// USB VID/PID: 0x1FC9 / 0x0094 (usbd_desc.c)
+//
+// Write protocol: command 'X' (0x58), three sub-commands per 4 KB SPI Flash sector:
+//
+//   Sub 1 — Prepare sector (radio reads existing 4 KB into its sector buffer):
+//     Request: [0x58, 0x01, sector_hi, sector_mid, sector_lo]  (5 bytes)
+//
+//   Sub 2 — Send data (overlay bytes into the sector buffer):
+//     Request: [0x58, 0x02, addr_hi3, addr_hi2, addr_hi1, addr_lo, len_hi, len_lo, data...]
+//
+//   Sub 3 — Write sector (erase 4 KB + program from sector buffer):
+//     Request: [0x58, 0x03]  (2 bytes)
+//
+//   Response on success: [0x58, subcommand]
+//   Response on error:   ['-']
+//
+// Codeplug file layout (128 KB):
+//   file[0x00000..0x0FFFF]  → EEPROM region  (SPI Flash hw addr = file addr)
+//   file[0x10000..0x1FFFF]  → SPI Flash region (hw addr = file addr + 0x90000)
+//
+// FLASH_ADDRESS_OFFSET = 0x20000 (codeplug.h, MDUV380/RT84/DM1701).
+// SPI Flash hw addr for second region = file offset + FLASH_ADDRESS_OFFSET + 0x70000
+//   = file offset + 0x90000
+//
+// Entirely-0xFF sectors are skipped to avoid overwriting radio settings or
+// calibration data that live in the same SPI Flash address space.
 
-// USB DFU 1.1 request codes
-const CPWR_DNLOAD    = 1;
-const CPWR_GETSTATUS = 3;
-const CPWR_CLRSTATUS = 4;
-const CPWR_ABORT     = 6;
+const CPWR_SERIAL_FILTERS = [{ usbVendorId: 0x1FC9, usbProductId: 0x0094 }];
 
-// DFU device state codes (bState in GETSTATUS response)
-const CPWR_STATE_IDLE        = 2;
-const CPWR_STATE_DNBUSY      = 4;
-const CPWR_STATE_DNLOAD_IDLE = 5;
-const CPWR_STATE_ERROR       = 10;
+const CPWR_CMD_BYTE    = 0x58;  // 'X'
+const CPWR_SUB_PREPARE = 0x01;
+const CPWR_SUB_SEND    = 0x02;
+const CPWR_SUB_WRITE   = 0x03;
+const CPWR_SECTOR_SIZE = 4096;
+const CPWR_CHUNK       = 1024;  // data bytes per Send Data request (max 2040)
+const CPWR_FILE_SIZE   = 0x20000;
+const CPWR_HALF        = CPWR_FILE_SIZE >>> 1;   // 64 KB per region
 
-const CPWR_STATUS_NAMES = {
-  0x01: 'errTARGET', 0x02: 'errFILE',    0x03: 'errWRITE',
-  0x04: 'errERASE',  0x05: 'errCHECK_ERASED', 0x06: 'errPROG',
-  0x07: 'errVERIFY', 0x08: 'errADDRESS', 0x09: 'errNOTDONE',
-  0x0A: 'errFIRMWARE', 0x0B: 'errVENDOR', 0x0E: 'errUNKNOWN',
-};
+// SPI Flash hw base for the second (SPI Flash) region:
+//   file 0x10000 + FLASH_ADDRESS_OFFSET(0x20000) + 0x70000 = 0xA0000
+const CPWR_FLASH_HW_BASE = 0xA0000;
 
-// STM32 DFU extension command bytes (sent in DFU_DNLOAD with wValue=0)
-const CPWR_CMD_SET_ADDR = 0x21;
-const CPWR_CMD_ERASE    = 0x41;
-
-// STM32F405 sector 10 is the codeplug staging area.  The firmware flasher only
-// erases sectors 3–9, so sector 10 survives a firmware flash and is safe to use
-// as a 128 KB landing zone for a codeplug import.
-const CPWR_BLOCK_SIZE    = 2048;
-const CPWR_STAGING_ADDR  = 0x080C0000; // sector 10 start
-const CPWR_CODEPLUG_SIZE = 0x20000;    // 128 KB — exact size of sector 10
-const CPWR_NUM_BLOCKS    = CPWR_CODEPLUG_SIZE / CPWR_BLOCK_SIZE; // 64 blocks
-
-function cpwrFindDfuInterface(device) {
-  for (const iface of device.configuration.interfaces) {
-    for (const alt of iface.alternates) {
-      if (alt.interfaceClass === 0xFE && alt.interfaceSubclass === 0x01) {
-        return iface.interfaceNumber;
-      }
-    }
+// Accumulate bytes from the Web Serial readable stream, preserving leftovers
+// across reads so USB packet boundaries never split a logical response.
+class SerialAccumulator {
+  constructor(reader) {
+    this._reader  = reader;
+    this._pending = new Uint8Array(0);
   }
-  return null;
-}
 
-async function cpwrOut(device, ifNum, request, value, data) {
-  const result = await device.controlTransferOut(
-    { requestType: 'class', recipient: 'interface', request, value, index: ifNum },
-    data instanceof Uint8Array ? data : new Uint8Array(0)
-  );
-  if (result.status !== 'ok') {
-    throw new Error(`DFU request 0x${request.toString(16)} failed: ${result.status}`);
-  }
-}
-
-async function cpwrGetStatus(device, ifNum) {
-  const result = await device.controlTransferIn(
-    { requestType: 'class', recipient: 'interface', request: CPWR_GETSTATUS, value: 0, index: ifNum },
-    6
-  );
-  if (result.status !== 'ok') throw new Error(`DFU_GETSTATUS failed: ${result.status}`);
-  const d = new Uint8Array(result.data.buffer);
-  return { bStatus: d[0], bwPollTimeout: d[1] | (d[2] << 8) | (d[3] << 16), bState: d[4] };
-}
-
-async function cpwrPoll(device, ifNum, targetState) {
-  for (;;) {
-    const st = await cpwrGetStatus(device, ifNum);
-    if (st.bStatus !== 0x00) {
-      const name = CPWR_STATUS_NAMES[st.bStatus] || `0x${st.bStatus.toString(16)}`;
-      throw new Error(`DFU device error: ${name}`);
+  async readExact(n) {
+    while (this._pending.length < n) {
+      const { value, done } = await this._reader.read();
+      if (done) throw new Error('Serial port closed unexpectedly.');
+      const chunk = value instanceof Uint8Array
+        ? value
+        : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+      const merged = new Uint8Array(this._pending.length + chunk.length);
+      merged.set(this._pending, 0);
+      merged.set(chunk, this._pending.length);
+      this._pending = merged;
     }
-    if (st.bState === CPWR_STATE_ERROR) throw new Error('DFU device entered error state.');
-    if (st.bState === targetState) return st;
-    if (st.bState === CPWR_STATE_DNBUSY) {
-      await new Promise(r => setTimeout(r, Math.max(st.bwPollTimeout, 10)));
-    }
+    const out     = this._pending.slice(0, n);
+    this._pending = this._pending.slice(n);
+    return out;
   }
+
+  releaseLock() { this._reader.releaseLock(); }
 }
 
-async function cpwrEraseSector(device, ifNum, addr) {
-  const cmd = new Uint8Array(5);
-  cmd[0] = CPWR_CMD_ERASE;
-  cmd[1] = (addr >>>  0) & 0xFF;
-  cmd[2] = (addr >>>  8) & 0xFF;
-  cmd[3] = (addr >>> 16) & 0xFF;
-  cmd[4] = (addr >>> 24) & 0xFF;
-  await cpwrOut(device, ifNum, CPWR_DNLOAD, 0, cmd);
-  await cpwrPoll(device, ifNum, CPWR_STATE_DNLOAD_IDLE);
+// Send a write request and verify the 2-byte success response [0x58, subCmd].
+async function cpwrRequest(writer, acc, bytes) {
+  await writer.write(bytes);
+  const r = await acc.readExact(1);
+  if (r[0] !== CPWR_CMD_BYTE) {
+    throw new Error('Radio returned an error during write. Check that the radio is powered on normally and the port is not in use by another application.');
+  }
+  await acc.readExact(1);  // subcommand echo
 }
 
-async function cpwrSetAddress(device, ifNum, addr) {
-  const cmd = new Uint8Array(5);
-  cmd[0] = CPWR_CMD_SET_ADDR;
-  cmd[1] = (addr >>>  0) & 0xFF;
-  cmd[2] = (addr >>>  8) & 0xFF;
-  cmd[3] = (addr >>> 16) & 0xFF;
-  cmd[4] = (addr >>> 24) & 0xFF;
-  await cpwrOut(device, ifNum, CPWR_DNLOAD, 0, cmd);
-  await cpwrPoll(device, ifNum, CPWR_STATE_DNLOAD_IDLE);
+// Write one 4 KB sector to SPI Flash via Prepare → Send data → Write.
+async function cpwrFlashSector(writer, acc, spiAddr, sectorData) {
+  const sector = Math.floor(spiAddr / CPWR_SECTOR_SIZE);
+
+  // 1. Prepare: radio reads the current sector into its internal buffer.
+  await cpwrRequest(writer, acc, new Uint8Array([
+    CPWR_CMD_BYTE, CPWR_SUB_PREPARE,
+    (sector >>> 16) & 0xFF,
+    (sector >>>  8) & 0xFF,
+     sector         & 0xFF,
+  ]));
+
+  // 2. Send data in chunks, overlaying our bytes into the buffer.
+  for (let i = 0; i < CPWR_SECTOR_SIZE; i += CPWR_CHUNK) {
+    const len  = Math.min(CPWR_CHUNK, CPWR_SECTOR_SIZE - i);
+    const addr = spiAddr + i;
+    const req  = new Uint8Array(8 + len);
+    req[0] = CPWR_CMD_BYTE; req[1] = CPWR_SUB_SEND;
+    req[2] = (addr >>> 24) & 0xFF;
+    req[3] = (addr >>> 16) & 0xFF;
+    req[4] = (addr >>>  8) & 0xFF;
+    req[5] =  addr         & 0xFF;
+    req[6] = (len  >>>  8) & 0xFF;
+    req[7] =  len          & 0xFF;
+    req.set(sectorData.subarray(i, i + len), 8);
+    await cpwrRequest(writer, acc, req);
+  }
+
+  // 3. Write: erase the 4 KB sector then program from the buffer.
+  await cpwrRequest(writer, acc, new Uint8Array([CPWR_CMD_BYTE, CPWR_SUB_WRITE]));
 }
 
-// Write an ArrayBuffer codeplug to the radio's staging flash sector via DFU.
-// onProgress({ phase: 'erase'|'write', pct: 0-100, msg: string })
+// Write an ArrayBuffer codeplug to the radio via USB CDC.
+// onProgress({ phase: 'write', pct: 0-100, msg: string })
 async function cpwrWriteCodeplug(arrayBuffer, onProgress) {
-  // Pad or truncate to exactly 128 KB
-  const src = new Uint8Array(arrayBuffer);
-  const buf = new Uint8Array(CPWR_CODEPLUG_SIZE);
-  buf.fill(0xFF);
-  buf.set(src.subarray(0, CPWR_CODEPLUG_SIZE));
+  if (!navigator.serial) {
+    throw new Error('Web Serial API not available. Use Chrome or Edge 89+.');
+  }
 
-  let device = null;
-  let ifNum  = null;
+  const src = new Uint8Array(arrayBuffer);
+
+  let port = null, writer = null, acc = null;
 
   try {
-    // 1. Request device
-    device = await navigator.usb.requestDevice({ filters: CPWR_FILTERS });
-    await device.open();
-    if (device.configuration === null) await device.selectConfiguration(1);
+    port = await navigator.serial.requestPort({ filters: CPWR_SERIAL_FILTERS });
+    await port.open({ baudRate: 115200 });
+    writer = port.writable.getWriter();
+    acc    = new SerialAccumulator(port.readable.getReader());
 
-    // 2. Find and claim the DFU interface
-    ifNum = cpwrFindDfuInterface(device);
-    if (ifNum === null) throw new Error('No DFU interface found. Is the radio in DFU mode?');
-    await device.claimInterface(ifNum);
-
-    // 3. Clear any stale error or in-progress state
-    let st = await cpwrGetStatus(device, ifNum);
-    if (st.bState === CPWR_STATE_ERROR) {
-      await cpwrOut(device, ifNum, CPWR_CLRSTATUS, 0);
-      st = await cpwrGetStatus(device, ifNum);
-    }
-    if (st.bState !== CPWR_STATE_IDLE && st.bState !== CPWR_STATE_DNLOAD_IDLE) {
-      await cpwrOut(device, ifNum, CPWR_ABORT, 0);
-      st = await cpwrGetStatus(device, ifNum);
-    }
-    if (st.bState !== CPWR_STATE_IDLE) {
-      throw new Error(`Device not ready (state ${st.bState}). Try reconnecting the radio.`);
+    // Collect all non-blank sectors. Skipping entirely-0xFF sectors preserves
+    // radio settings / calibration data stored elsewhere in the same SPI Flash.
+    const regions = [
+      { fileBase: 0x00000,   hwBase: 0x00000,          label: 'EEPROM' },
+      { fileBase: CPWR_HALF, hwBase: CPWR_FLASH_HW_BASE, label: 'SPI Flash' },
+    ];
+    const queue = [];
+    for (const { fileBase, hwBase, label } of regions) {
+      for (let i = 0; i < CPWR_HALF; i += CPWR_SECTOR_SIZE) {
+        const data = src.subarray(fileBase + i, fileBase + i + CPWR_SECTOR_SIZE);
+        if (!data.every(b => b === 0xFF)) {
+          queue.push({ spiAddr: hwBase + i, data, label });
+        }
+      }
     }
 
-    // 4. Erase sector 10 (single 128 KB sector)
-    onProgress({ phase: 'erase', pct: 0, msg: 'Erasing staging area…' });
-    await cpwrEraseSector(device, ifNum, CPWR_STAGING_ADDR);
-    onProgress({ phase: 'erase', pct: 100, msg: 'Erase complete.' });
+    const total = queue.length;
+    if (total === 0) throw new Error('Codeplug is blank — nothing to write.');
 
-    // 5. Set write address to start of staging area
-    await cpwrSetAddress(device, ifNum, CPWR_STAGING_ADDR);
+    onProgress({ phase: 'write', pct: 0, msg: `Writing ${total} sectors…` });
 
-    // 6. Write 64 × 2 KB blocks (wValue starts at 2 per STM32 DFU convention)
-    for (let block = 0; block < CPWR_NUM_BLOCKS; block++) {
-      const offset = block * CPWR_BLOCK_SIZE;
-      const chunk  = buf.subarray(offset, offset + CPWR_BLOCK_SIZE);
-      await cpwrOut(device, ifNum, CPWR_DNLOAD, block + 2, chunk);
-      await cpwrPoll(device, ifNum, CPWR_STATE_DNLOAD_IDLE);
-      const pct = Math.round(((block + 1) / CPWR_NUM_BLOCKS) * 100);
-      onProgress({ phase: 'write', pct, msg: `Writing block ${block + 1} of ${CPWR_NUM_BLOCKS}…` });
+    for (let i = 0; i < total; i++) {
+      const { spiAddr, data, label } = queue[i];
+      await cpwrFlashSector(writer, acc, spiAddr, data);
+      const pct = Math.round(((i + 1) / total) * 100);
+      onProgress({ phase: 'write', pct, msg: `Writing ${label} sector ${i + 1} of ${total}…` });
     }
-
-    // 7. Abort — data is already committed; no manifest needed.
-    // Leaves the device in DFU mode so the user can disconnect cleanly.
-    await cpwrOut(device, ifNum, CPWR_ABORT, 0);
 
     return { ok: true };
 
   } finally {
-    if (device) {
-      try { if (ifNum !== null) await device.releaseInterface(ifNum); } catch (_) {}
-      try { await device.close(); } catch (_) {}
-    }
+    if (acc)    { try { acc.releaseLock();    } catch (_) {} }
+    if (writer) { try { writer.releaseLock(); } catch (_) {} }
+    if (port)   { try { await port.close();   } catch (_) {} }
   }
 }

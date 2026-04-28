@@ -563,20 +563,21 @@
     </div>
     <div class="modal-body">
       <p class="section-desc">
-        Writes your codeplug to the radio&rsquo;s staging area via WebUSB.
-        After writing, unplug the USB cable and power on the radio normally &mdash;
-        ClearDMR will import the codeplug on the next boot.
+        Writes your codeplug directly to the radio&rsquo;s memory via USB.
+        The radio must be <strong>powered on normally</strong> &mdash;
+        do <strong>not</strong> enter DFU mode.
+        Power-cycle the radio after writing to apply the new codeplug.
       </p>
       <div class="write-dfu-steps">
         <ol>
-          <li>Hold <strong>PTT + SK1</strong> simultaneously.</li>
-          <li>While holding both, turn the radio on.</li>
-          <li>The LED will flash <strong>red/green</strong> to confirm DFU mode.</li>
-          <li>Click <strong>Connect &amp; Write</strong> below and select your radio.</li>
+          <li>Power on the radio normally (do <strong>not</strong> hold PTT&nbsp;+&nbsp;SK1).</li>
+          <li>Connect the USB cable to your computer.</li>
+          <li>Click <strong>Connect &amp; Write</strong> and select your radio.</li>
+          <li>After writing completes, power-cycle the radio to apply changes.</li>
         </ol>
       </div>
       <div class="write-note">
-        WebUSB requires Chrome, Edge, or another Chromium-based browser.
+        Web Serial requires Chrome, Edge, or another Chromium-based browser.
         Firefox and Safari are not supported.
       </div>
       <div class="write-progress-wrap" id="write-progress-wrap">
@@ -1772,18 +1773,14 @@
     setWriteStatus('Connecting…', 'muted');
 
     try {
-      await cpwrWriteCodeplug(codeplug.toArrayBuffer(), ({ phase, pct, msg }) => {
-        // Erase = 0–10 %, write = 10–100 %
-        const overall = phase === 'erase'
-          ? Math.round(pct * 0.1)
-          : 10 + Math.round(pct * 0.9);
-        writeProgressFill.style.width  = `${overall}%`;
-        writeProgressLabel.textContent = `${overall}%`;
+      await cpwrWriteCodeplug(codeplug.toArrayBuffer(), ({ pct, msg }) => {
+        writeProgressFill.style.width  = `${pct}%`;
+        writeProgressLabel.textContent = `${pct}%`;
         setWriteStatus(msg || '', 'muted');
       });
       writeProgressFill.style.width  = '100%';
       writeProgressLabel.textContent = '100%';
-      setWriteStatus('Done! Unplug the USB cable and power on normally to apply the codeplug.', 'ok');
+      setWriteStatus('Done! Power-cycle the radio to apply the new codeplug.', 'ok');
     } catch (err) {
       if (err.name === 'NotFoundError') {
         setWriteStatus('No device selected.', 'muted');
