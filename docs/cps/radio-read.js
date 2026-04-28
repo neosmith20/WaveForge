@@ -14,43 +14,62 @@
 // Response on success: ['R', len_hi, len_lo, data...]
 // Response on error:   ['-']
 //
-// Codeplug file layout (128 KB) and read strategy:
+// Codeplug file layout (128 KB) and sparse-read strategy:
 //
-//   file[0x00000..0x07FFF]  → EEPROM lower half  (CPS_ACCESS_EEPROM, hw addr = file addr)
-//                             Channels, general settings, channel bitmap live here.
-//                             Most radios expose this via area=2, but some boundary
-//                             chunks may need area=1 fallback.
+//   The Web CPS parser (`cps.js`) only touches a handful of exact address ranges.
+//   Some radios return errors or even soft-lock when large contiguous reads cross
+//   sparse / unmapped gaps, so we do not read 32 KB / 64 KB synthetic regions.
 //
-//   file[0x08000..0x0FFFF]  → EEPROM upper half  (hw addr = file addr)
-//                             Zone bitmap and zone list live here.
-//                             Access mode varies by radio, so we probe both area=2
-//                             and area=1 at the known zone offsets and use whichever
-//                             mode succeeds for this radio, with per-chunk fallback.
+//   Instead we:
+//     1. Probe the zone area with both access modes using small reads.
+//     2. Build the exact set of file ranges that `cps.js` actually uses.
+//     3. Merge only adjacent/overlapping ranges that share the same access policy.
+//     4. Read each merged range in conservative chunks clipped to that range only.
 //
-//   file[0x10000..0x1FFFF]  → SPI Flash region (CPS_ACCESS_FLASH, hw addr = file addr + 0x90000)
-//                             Contacts, RX groups live here.
-//                             0x90000 = FLASH_ADDRESS_OFFSET(0x20000) + 0x70000 (codeplug.h)
-//                             CONTACTS: hw 0x20000 + 0x87620 = 0xA7620 → file 0x17620  ✓
+//   For file offsets >= 0x10000, SPI Flash hardware address = file offset + 0x90000.
+//   CONTACTS example: file 0x17620 → hw 0xA7620.
 
 const CPRD_SERIAL_FILTERS = [{ usbVendorId: 0x1FC9, usbProductId: 0x0094 }];
 
 const CPRD_AREA_EEPROM    = 2;
 const CPRD_AREA_FLASH     = 1;
-const CPRD_CHUNK          = 1024;       // bytes per request (firmware cap: 2045)
 const CPRD_FILE_SIZE      = 0x20000;    // 128 KB
-const CPRD_HALF           = CPRD_FILE_SIZE >>> 1;   // 64 KB per region
-const CPRD_QUARTER        = CPRD_HALF  >>> 1;       // 32 KB — EEPROM alias boundary
 const CPRD_MAX_RETRIES    = 2;          // retry transient chunk failures before giving up
 const CPRD_PROBE_LEN      = 32;
+const CPRD_CHUNK_SMALL    = 128;
+const CPRD_CHUNK_MEDIUM   = 256;
 
 // SPI Flash hw base address for the third (SPI Flash) region.
 // = file offset 0x10000 + FLASH_ADDRESS_OFFSET(0x20000) + 0x70000 = 0xA0000
 const CPRD_FLASH_HW_BASE  = 0xA0000;
+const CPRD_FLASH_FILE_BASE = 0x10000;
 
-const CPRD_LOWER_BOUNDARY_OFFSET = 0x07C00;
+const CPRD_DEVICE_INFO_OFFSET  = 0x0080;
+const CPRD_DEVICE_INFO_SIZE    = 8;     // band limits used by cps.js
+const CPRD_GENERAL_SETTINGS_OFFSET = 0x00E0;
+const CPRD_GENERAL_SETTINGS_SIZE   = 12;
+const CPRD_CHAN_BITMAP_OFFSET  = 0x3780;
+const CPRD_CHAN_BITMAP_SIZE    = 16;
+const CPRD_CHANNELS_OFFSET     = 0x3790;
+const CPRD_CHANNELS_SIZE       = 128 * 56;
+const CPRD_BOOT_IMAGE_OFFSET   = 0x6B40;
+const CPRD_BOOT_IMAGE_SIZE     = 160 * 128 / 8;
+const CPRD_BOOT_TUNE_OFFSET    = 0x7518;
+const CPRD_BOOT_TUNE_SIZE      = 10 * 4;
+const CPRD_BOOT_LINE1_OFFSET   = 0x7540;
+const CPRD_BOOT_LINE_SIZE      = 16;
 const CPRD_ZONE_BITMAP_OFFSET = 0x8010;
+const CPRD_ZONE_BITMAP_SIZE   = 32;
 const CPRD_ZONE_LIST_OFFSET   = 0x8030;
 const CPRD_ZONE_FMT_OFFSET    = 0x806F;
+const CPRD_ZONE_LIST_MAX_SIZE = 68 * (16 + 80 * 2); // max 80-ch OpenGD77 layout
+const CPRD_CONTACTS_OFFSET    = 0x17620;
+const CPRD_CONTACTS_SIZE      = 1024 * 24;
+const CPRD_RXG_LEN_OFFSET     = 0x1D620;
+const CPRD_RXG_LEN_SIZE       = 76;     // firmware CODEPLUG_RX_GROUPLIST_MAX
+const CPRD_RXG_DATA_OFFSET    = 0x1D6A0;
+const CPRD_RXG_DATA_SIZE      = 76 * 82;
+
 const CPRD_REF_ZONE_BITMAP_PREFIX = new Uint8Array([0x3F, 0x00]);
 const CPRD_REF_ZONE0_NAME         = new Uint8Array([0x41, 0x6E, 0x61, 0x6C, 0x6F, 0x67]); // "Analog"
 const CPRD_REF_ZONE0_REFS_PREFIX  = new Uint8Array([0x01, 0x00, 0x35, 0x00, 0x02, 0x00, 0x03, 0x00]);
@@ -276,6 +295,108 @@ async function cprdProbeAccess(writer, acc, areaType, hwAddr, length, label) {
   return { ok: !!data, data };
 }
 
+function cprdSparseRange(start, end, label, primaryArea, secondaryArea, chunkSize) {
+  return { start, end, label, primaryArea, secondaryArea, chunkSize };
+}
+
+function cprdMergeRanges(ranges) {
+  const sorted = [...ranges].sort((a, b) => a.start - b.start);
+  const merged = [];
+  for (const range of sorted) {
+    const prev = merged[merged.length - 1];
+    if (prev &&
+        range.start <= prev.end &&
+        range.primaryArea === prev.primaryArea &&
+        range.secondaryArea === prev.secondaryArea &&
+        range.chunkSize === prev.chunkSize) {
+      prev.end = Math.max(prev.end, range.end);
+      prev.labels.push(range.label);
+    } else {
+      merged.push({ ...range, labels: [range.label] });
+    }
+  }
+  return merged;
+}
+
+function cprdBuildReadRanges(zonePreferredArea) {
+  const zoneFallbackArea = zonePreferredArea === CPRD_AREA_EEPROM ? CPRD_AREA_FLASH : CPRD_AREA_EEPROM;
+  const ranges = [
+    cprdSparseRange(
+      CPRD_DEVICE_INFO_OFFSET,
+      CPRD_DEVICE_INFO_OFFSET + CPRD_DEVICE_INFO_SIZE,
+      'device-info',
+      CPRD_AREA_EEPROM, CPRD_AREA_FLASH, CPRD_CHUNK_SMALL
+    ),
+    cprdSparseRange(
+      CPRD_GENERAL_SETTINGS_OFFSET,
+      CPRD_GENERAL_SETTINGS_OFFSET + CPRD_GENERAL_SETTINGS_SIZE,
+      'general-settings',
+      CPRD_AREA_EEPROM, CPRD_AREA_FLASH, CPRD_CHUNK_SMALL
+    ),
+    cprdSparseRange(
+      CPRD_CHAN_BITMAP_OFFSET,
+      CPRD_CHANNELS_OFFSET + CPRD_CHANNELS_SIZE,
+      'channels',
+      CPRD_AREA_EEPROM, CPRD_AREA_FLASH, CPRD_CHUNK_SMALL
+    ),
+    cprdSparseRange(
+      CPRD_BOOT_IMAGE_OFFSET,
+      CPRD_BOOT_IMAGE_OFFSET + CPRD_BOOT_IMAGE_SIZE,
+      'boot-image',
+      CPRD_AREA_EEPROM, CPRD_AREA_FLASH, CPRD_CHUNK_SMALL
+    ),
+    cprdSparseRange(
+      CPRD_BOOT_TUNE_OFFSET,
+      CPRD_BOOT_TUNE_OFFSET + CPRD_BOOT_TUNE_SIZE,
+      'boot-tune',
+      CPRD_AREA_EEPROM, CPRD_AREA_FLASH, CPRD_CHUNK_SMALL
+    ),
+    cprdSparseRange(
+      CPRD_BOOT_LINE1_OFFSET,
+      CPRD_BOOT_LINE1_OFFSET + CPRD_BOOT_LINE_SIZE,
+      'boot-line1',
+      CPRD_AREA_EEPROM, CPRD_AREA_FLASH, CPRD_CHUNK_SMALL
+    ),
+    cprdSparseRange(
+      CPRD_BOOT_LINE1_OFFSET + CPRD_BOOT_LINE_SIZE,
+      CPRD_BOOT_LINE1_OFFSET + CPRD_BOOT_LINE_SIZE * 2,
+      'boot-line2',
+      CPRD_AREA_EEPROM, CPRD_AREA_FLASH, CPRD_CHUNK_SMALL
+    ),
+    cprdSparseRange(
+      CPRD_ZONE_BITMAP_OFFSET,
+      CPRD_ZONE_LIST_OFFSET + CPRD_ZONE_LIST_MAX_SIZE,
+      'zones',
+      zonePreferredArea, zoneFallbackArea, CPRD_CHUNK_SMALL
+    ),
+    cprdSparseRange(
+      CPRD_CONTACTS_OFFSET,
+      CPRD_CONTACTS_OFFSET + CPRD_CONTACTS_SIZE,
+      'contacts',
+      CPRD_AREA_FLASH, null, CPRD_CHUNK_MEDIUM
+    ),
+    cprdSparseRange(
+      CPRD_RXG_LEN_OFFSET,
+      CPRD_RXG_LEN_OFFSET + CPRD_RXG_LEN_SIZE,
+      'rxg-lengths',
+      CPRD_AREA_FLASH, null, CPRD_CHUNK_MEDIUM
+    ),
+    cprdSparseRange(
+      CPRD_RXG_DATA_OFFSET,
+      CPRD_RXG_DATA_OFFSET + CPRD_RXG_DATA_SIZE,
+      'rxg-data',
+      CPRD_AREA_FLASH, null, CPRD_CHUNK_MEDIUM
+    ),
+  ];
+  return cprdMergeRanges(ranges);
+}
+
+function cprdFileOffsetToHwAddr(fileOffset) {
+  return (fileOffset < CPRD_FLASH_FILE_BASE)
+    ? fileOffset
+    : (CPRD_FLASH_HW_BASE + (fileOffset - CPRD_FLASH_FILE_BASE));
+}
+
 async function cprdChooseZoneArea(writer, acc) {
   const probes = [
     { offset: CPRD_ZONE_BITMAP_OFFSET, length: 32, label: 'bitmap_0x8010' },
@@ -321,29 +442,19 @@ async function cprdChooseZoneArea(writer, acc) {
   return preferredArea;
 }
 
-async function cprdProbeLowerBoundary(writer, acc) {
-  const result = {};
-  for (const areaType of [CPRD_AREA_EEPROM, CPRD_AREA_FLASH]) {
-    const probe = await cprdProbeAccess(
-      writer, acc, areaType, CPRD_LOWER_BOUNDARY_OFFSET, CPRD_PROBE_LEN, 'lower-boundary-0x07C00'
-    );
-    result[areaType] = {
-      ok: probe.ok,
-      data: cprdHexData(probe.data, CPRD_PROBE_LEN),
-    };
-  }
-  console.debug('[cpwrReadCodeplug] lower boundary probe', {
-    fileOffset: '0x07C00',
-    eeprom: result[CPRD_AREA_EEPROM],
-    flash: result[CPRD_AREA_FLASH],
-  });
-}
-
-function cprdLogReadDebug(fileBuf, chunkFailures) {
+function cprdLogReadDebug(fileBuf, chunkFailures, ranges) {
   const zoneBitmap = fileBuf.subarray(CPRD_ZONE_BITMAP_OFFSET, CPRD_ZONE_BITMAP_OFFSET + 32);
   const zone0      = fileBuf.subarray(CPRD_ZONE_LIST_OFFSET, CPRD_ZONE_LIST_OFFSET + 32);
   const zoneProbe  = fileBuf.subarray(CPRD_ZONE_FMT_OFFSET, CPRD_ZONE_FMT_OFFSET + 1);
   console.debug('[cpwrReadCodeplug] read debug', {
+    sparseRanges: ranges.map(r => ({
+      label: r.labels.join(','),
+      fileStart: '0x' + r.start.toString(16).toUpperCase().padStart(5, '0'),
+      fileEnd: '0x' + r.end.toString(16).toUpperCase().padStart(5, '0'),
+      primaryArea: r.primaryArea,
+      secondaryArea: r.secondaryArea,
+      chunkSize: r.chunkSize,
+    })),
     bitmap_0x8010: cprdHexSlice(fileBuf, CPRD_ZONE_BITMAP_OFFSET, 32),
     zone0_0x8030:  cprdHexSlice(fileBuf, CPRD_ZONE_LIST_OFFSET, 32),
     probe_0x806F:  cprdHexSlice(fileBuf, CPRD_ZONE_FMT_OFFSET, 1),
@@ -388,63 +499,48 @@ async function cpwrReadCodeplug(onProgress) {
     acc    = new SerialAccumulator(port.readable.getReader());
 
     onProgress({ phase: 'read', pct: 0, msg: 'Probing radio read access…' });
-    await cprdProbeLowerBoundary(writer, acc);
     const zonePreferredArea = await cprdChooseZoneArea(writer, acc);
+    const ranges = cprdBuildReadRanges(zonePreferredArea);
 
-    // Three logical regions; total chunks stays 128 (same time budget as before).
-    const totalChunks = Math.ceil(CPRD_QUARTER / CPRD_CHUNK) * 2 +
-                        Math.ceil(CPRD_HALF    / CPRD_CHUNK);
+    const totalChunks = ranges.reduce((sum, range) =>
+      sum + Math.ceil((range.end - range.start) / range.chunkSize), 0);
     let chunksDone = 0;
     const chunkFailures = [];
 
-    const readRegion = async (primaryArea, secondaryArea, hwBase, fileBase, regionLen, label) => {
-      for (let i = 0; i < regionLen; i += CPRD_CHUNK) {
-        const len  = Math.min(CPRD_CHUNK, regionLen - i);
-        const hwAddr = hwBase + i;
+    const readRange = async (range) => {
+      for (let fileOffset = range.start; fileOffset < range.end; fileOffset += range.chunkSize) {
+        const len = Math.min(range.chunkSize, range.end - fileOffset);
+        const hwAddr = cprdFileOffsetToHwAddr(fileOffset);
         const triedAreas = [];
-        let data = await cprdTryRead(writer, acc, primaryArea, hwAddr, len, `${label} primary`);
-        triedAreas.push(primaryArea);
-        if (!data && secondaryArea !== null && secondaryArea !== primaryArea) {
+        let data = await cprdTryRead(writer, acc, range.primaryArea, hwAddr, len, `${range.label} primary`);
+        triedAreas.push(range.primaryArea);
+        if (!data && range.secondaryArea !== null && range.secondaryArea !== range.primaryArea) {
           console.debug('[cpwrReadCodeplug] retrying chunk with alternate area', {
-            label,
-            fileOffset: '0x' + (fileBase + i).toString(16).toUpperCase().padStart(5, '0'),
+            label: range.label,
+            fileOffset: '0x' + fileOffset.toString(16).toUpperCase().padStart(5, '0'),
             hwAddr: '0x' + hwAddr.toString(16).toUpperCase().padStart(5, '0'),
-            primaryArea,
-            secondaryArea,
+            primaryArea: range.primaryArea,
+            secondaryArea: range.secondaryArea,
           });
-          data = await cprdTryRead(writer, acc, secondaryArea, hwAddr, len, `${label} fallback`);
-          triedAreas.push(secondaryArea);
+          data = await cprdTryRead(writer, acc, range.secondaryArea, hwAddr, len, `${range.label} fallback`);
+          triedAreas.push(range.secondaryArea);
         }
         if (data) {
-          fileBuf.set(data.subarray(0, len), fileBase + i);
+          fileBuf.set(data.subarray(0, len), fileOffset);
         } else {
-          chunkFailures.push({ label, triedAreas, fileOffset: fileBase + i, hwAddr, length: len });
+          chunkFailures.push({ label: range.label, triedAreas, fileOffset, hwAddr, length: len });
         }
         chunksDone++;
         const pct = Math.round((chunksDone / totalChunks) * 100);
-        onProgress({ phase: 'read', pct, msg: `Reading ${label}… ${pct}%` });
+        onProgress({ phase: 'read', pct, msg: `Reading ${range.labels.join(', ')}… ${pct}%` });
       }
     };
 
-    // Lower EEPROM (channels, settings) — prefer area=2, but boundary chunks may
-    // need area=1 on some radios.
-    onProgress({ phase: 'read', pct: 0, msg: 'Reading EEPROM region…' });
-    await readRegion(CPRD_AREA_EEPROM, CPRD_AREA_FLASH, 0x00000, 0x00000, CPRD_QUARTER, 'EEPROM');
+    for (const range of ranges) {
+      await readRange(range);
+    }
 
-    // Zone block — choose the preferred area from live probes, but retry each
-    // failed chunk via the other access mode.
-    onProgress({ phase: 'read', pct: 25, msg: 'Reading zone region…' });
-    await readRegion(
-      zonePreferredArea,
-      zonePreferredArea === CPRD_AREA_EEPROM ? CPRD_AREA_FLASH : CPRD_AREA_EEPROM,
-      0x08000, 0x08000, CPRD_QUARTER, 'zones'
-    );
-
-    // SPI Flash region (contacts, RX groups).
-    onProgress({ phase: 'read', pct: 50, msg: 'Reading SPI Flash region…' });
-    await readRegion(CPRD_AREA_FLASH, null, CPRD_FLASH_HW_BASE, CPRD_HALF, CPRD_HALF, 'SPI Flash');
-
-    cprdLogReadDebug(fileBuf, chunkFailures);
+    cprdLogReadDebug(fileBuf, chunkFailures, ranges);
 
     if (chunkFailures.length > 0) {
       const sample = chunkFailures.slice(0, 4).map(f =>
