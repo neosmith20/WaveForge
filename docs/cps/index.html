@@ -837,16 +837,17 @@
     channels.forEach(ch => {
       const tr = document.createElement('tr');
       tr.style.cursor      = 'pointer';
-      tr.draggable         = true;
       tr.dataset.slotIndex = ch.slotIndex;
+      // draggable is set true only on handle mousedown to avoid accidental drags
 
       tr.addEventListener('dragstart', e => {
-        if (!e.target.closest('.drag-handle')) { e.preventDefault(); return; }
+        if (!tr.draggable) { e.preventDefault(); return; }
         dragSrcRow = tr;
         e.dataTransfer.effectAllowed = 'move';
         setTimeout(() => tr.classList.add('dragging'), 0);
       });
       tr.addEventListener('dragend', () => {
+        tr.draggable = false;
         tr.classList.remove('dragging');
         tbodies.channels.querySelectorAll('.drag-over').forEach(r => r.classList.remove('drag-over'));
         dragSrcRow = null;
@@ -895,6 +896,8 @@
         <td class="col-actions">
           <button class="btn-row-delete" type="button" title="Delete channel">&#10005;</button>
         </td>`;
+      tr.querySelector('.drag-handle').addEventListener('mousedown', () => { tr.draggable = true; });
+      tr.addEventListener('mouseup', () => { if (!dragSrcRow) tr.draggable = false; });
       tr.querySelector('.btn-row-delete').addEventListener('click', e => {
         e.stopPropagation();
         if (!confirm(`Delete channel "${ch.name}"?`)) return;
