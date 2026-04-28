@@ -67,6 +67,8 @@
     <button class="tab-btn" data-tab="contacts" type="button">
       Contacts <span class="tab-count" id="count-contacts">0</span>
     </button>
+    <button class="tab-btn" data-tab="bootscreen" type="button">Boot Screen</button>
+    <button class="tab-btn" data-tab="bootmelody" type="button">Boot Melody</button>
   </div>
 
   <!-- Main area -->
@@ -174,6 +176,90 @@
           <tbody id="tbody-contacts"></tbody>
         </table>
       </div>
+
+      <!-- Boot Screen panel -->
+      <div id="panel-bootscreen" class="tab-panel boot-panel">
+
+        <div class="section-card">
+          <div class="section-card-header"><h3>Upload New Boot Image</h3></div>
+          <div class="section-card-body">
+            <p class="section-desc">
+              Choose an image to show when your radio powers on. It will be scaled to fit
+              the 160&times;128&nbsp;px monochrome display and converted to black and white.
+              Adjust the threshold slider to control which tones become black or white.
+            </p>
+            <div class="boot-upload-row">
+              <input type="file" id="bootimg-input" accept="image/*" hidden>
+              <button class="btn-sm btn-sm-outline" id="bootimg-pick" type="button">Choose image&hellip;</button>
+              <span class="boot-upload-hint">PNG, JPG, GIF &bull; Will be scaled to 160&times;128&nbsp;px</span>
+            </div>
+            <div class="boot-threshold-row hidden" id="boot-threshold-row">
+              <span class="boot-threshold-label">B&amp;W Threshold</span>
+              <input type="range" id="boot-threshold" min="1" max="254" value="128" class="boot-slider">
+              <span id="boot-threshold-val" class="boot-threshold-num">128</span>
+            </div>
+            <div class="boot-canvas-wrap hidden" id="boot-upload-preview">
+              <div>
+                <canvas id="boot-upload-canvas" class="boot-canvas" width="160" height="128"></canvas>
+                <p class="boot-canvas-label">Preview &mdash; 160&times;128&nbsp;px shown at 2&times;</p>
+              </div>
+            </div>
+            <div class="boot-action-row hidden" id="boot-upload-actions">
+              <button class="btn-sm btn-sm-outline" id="bootimg-clear" type="button">Clear</button>
+              <button class="btn-sm btn-sm-primary" id="bootimg-save" type="button" disabled>Save to Codeplug</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-card hidden" id="boot-current-card">
+          <div class="section-card-header"><h3>Current Boot Image in Codeplug</h3></div>
+          <div class="section-card-body">
+            <p class="section-desc">This is the boot image currently stored in the loaded codeplug file.</p>
+            <div class="boot-canvas-wrap">
+              <div>
+                <canvas id="boot-current-canvas" class="boot-canvas" width="160" height="128"></canvas>
+                <p class="boot-canvas-label">160&times;128&nbsp;px shown at 2&times;</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /#panel-bootscreen -->
+
+      <!-- Boot Melody panel -->
+      <div id="panel-bootmelody" class="tab-panel melody-panel">
+
+        <div class="section-card">
+          <div class="section-card-header"><h3>Boot Melody</h3></div>
+          <div class="section-card-body">
+            <p class="section-desc">
+              One note per line &mdash; format: <code>note, duration, pause, volume</code><br>
+              <strong>note</strong>: MIDI note number (0&nbsp;= rest, 60&nbsp;= middle&nbsp;C, 69&nbsp;= A4 / 440&nbsp;Hz, 72&nbsp;= C5)
+              &bull; <strong>duration</strong>: ~100&nbsp;ms units, 1–255
+              &bull; <strong>pause</strong>: silence after note, ~50&nbsp;ms units, 0–255
+              &bull; <strong>volume</strong>: 0–15. Maximum 10 notes total.
+            </p>
+            <div class="melody-toolbar">
+              <select id="melody-examples" class="search-input" style="width:auto;min-width:150px">
+                <option value="">Load example&hellip;</option>
+                <option value="cq">CQ Call</option>
+                <option value="jingle">Startup Jingle</option>
+                <option value="sweep">Power-On Sweep</option>
+                <option value="roger">DMR Roger Beep</option>
+              </select>
+              <button class="btn-sm btn-sm-outline" id="melody-play" type="button">&#9654; Play</button>
+              <button class="btn-sm btn-sm-outline hidden" id="melody-stop" type="button">&#9632; Stop</button>
+            </div>
+            <textarea id="melody-textarea" class="melody-textarea" rows="10"
+              placeholder="69, 3, 1, 10&#10;72, 3, 1, 10&#10;74, 3, 1, 10&#10;76, 6, 2, 12"></textarea>
+            <p class="melody-status" id="melody-status"></p>
+            <div class="section-actions">
+              <button class="btn-sm btn-sm-primary" id="melody-save" type="button" disabled>Save to Codeplug</button>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /#panel-bootmelody -->
 
     </div><!-- /#table-area -->
 
@@ -473,9 +559,11 @@
 
   const tabBtns   = document.querySelectorAll('.tab-btn');
   const tabPanels = {
-    channels: document.getElementById('panel-channels'),
-    zones:    document.getElementById('panel-zones'),
-    contacts: document.getElementById('panel-contacts'),
+    channels:   document.getElementById('panel-channels'),
+    zones:      document.getElementById('panel-zones'),
+    contacts:   document.getElementById('panel-contacts'),
+    bootscreen: document.getElementById('panel-bootscreen'),
+    bootmelody: document.getElementById('panel-bootmelody'),
   };
   const countEls = {
     channels: document.getElementById('count-channels'),
@@ -603,6 +691,7 @@
     refreshChannels();
     refreshZones();
     refreshContacts();
+    loadBootSections();
     emptyState.classList.add('hidden');
     tableArea.classList.remove('hidden');
   }
@@ -1151,6 +1240,262 @@
     return String(str)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+
+  // ── Boot Screen ──────────────────────────────────────────────────────────
+
+  const BOOT_W = BOOT_IMAGE_W;   // 160
+  const BOOT_H = BOOT_IMAGE_H;   // 128
+
+  let bootPendingBits = null;    // Uint8Array (1bpp) awaiting save
+  let bootSourcePixels = null;   // ImageData from loaded file (at 160×128)
+
+  document.getElementById('bootimg-pick').addEventListener('click', () =>
+    document.getElementById('bootimg-input').click()
+  );
+
+  document.getElementById('bootimg-input').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const off = document.createElement('canvas');
+      off.width = BOOT_W; off.height = BOOT_H;
+      const octx = off.getContext('2d');
+      octx.fillStyle = '#ffffff';
+      octx.fillRect(0, 0, BOOT_W, BOOT_H);
+      const scale = Math.min(BOOT_W / img.width, BOOT_H / img.height);
+      const sw = img.width * scale, sh = img.height * scale;
+      octx.drawImage(img, (BOOT_W - sw) / 2, (BOOT_H - sh) / 2, sw, sh);
+      bootSourcePixels = octx.getImageData(0, 0, BOOT_W, BOOT_H);
+      URL.revokeObjectURL(url);
+      applyBootThreshold();
+      document.getElementById('boot-threshold-row').classList.remove('hidden');
+      document.getElementById('boot-upload-preview').classList.remove('hidden');
+      document.getElementById('boot-upload-actions').classList.remove('hidden');
+      document.getElementById('bootimg-save').disabled = !codeplug;
+    };
+    img.onerror = () => { alert('Could not load image. Try a different file.'); URL.revokeObjectURL(url); };
+    img.src = url;
+  });
+
+  document.getElementById('boot-threshold').addEventListener('input', e => {
+    document.getElementById('boot-threshold-val').textContent = e.target.value;
+    applyBootThreshold();
+  });
+
+  function applyBootThreshold() {
+    if (!bootSourcePixels) return;
+    const threshold = parseInt(document.getElementById('boot-threshold').value, 10);
+    const ctx = document.getElementById('boot-upload-canvas').getContext('2d');
+    const src = bootSourcePixels.data;
+    const out = ctx.createImageData(BOOT_W, BOOT_H);
+    const dst = out.data;
+    const bits = new Uint8Array(BOOT_W * BOOT_H / 8);
+
+    for (let y = 0; y < BOOT_H; y++) {
+      for (let x = 0; x < BOOT_W; x++) {
+        const pi    = (y * BOOT_W + x) * 4;
+        const alpha = src[pi + 3] / 255;
+        const lum   = (0.299 * src[pi] + 0.587 * src[pi + 1] + 0.114 * src[pi + 2]) * alpha
+                    + 255 * (1 - alpha);   // transparent pixels → white
+        const black = lum < threshold;
+        const v     = black ? 0 : 255;
+        dst[pi] = dst[pi+1] = dst[pi+2] = v; dst[pi+3] = 255;
+        if (black) bits[y * (BOOT_W >> 3) + (x >> 3)] |= 1 << (7 - (x & 7));
+      }
+    }
+    ctx.putImageData(out, 0, 0);
+    bootPendingBits = bits;
+  }
+
+  function renderBootBytesToCanvas(bytes, canvas) {
+    const ctx = canvas.getContext('2d');
+    const img = ctx.createImageData(BOOT_W, BOOT_H);
+    const dst = img.data;
+    let hasContent = false;
+    for (let y = 0; y < BOOT_H; y++) {
+      for (let x = 0; x < BOOT_W; x++) {
+        const black = !!(bytes[y * (BOOT_W >> 3) + (x >> 3)] & (1 << (7 - (x & 7))));
+        const pi    = (y * BOOT_W + x) * 4;
+        const v     = black ? 0 : 255;
+        dst[pi] = dst[pi+1] = dst[pi+2] = v; dst[pi+3] = 255;
+        if (black) hasContent = true;
+      }
+    }
+    if (hasContent) ctx.putImageData(img, 0, 0);
+    return hasContent;
+  }
+
+  document.getElementById('bootimg-save').addEventListener('click', () => {
+    if (!codeplug || !bootPendingBits) return;
+    codeplug.writeBootImage(bootPendingBits);
+    // Refresh the "current image" panel
+    document.getElementById('boot-current-card').classList.remove('hidden');
+    renderBootBytesToCanvas(bootPendingBits, document.getElementById('boot-current-canvas'));
+    const btn = document.getElementById('bootimg-save');
+    const orig = btn.textContent;
+    btn.textContent = 'Saved!';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  });
+
+  document.getElementById('bootimg-clear').addEventListener('click', () => {
+    bootSourcePixels = null; bootPendingBits = null;
+    const ctx = document.getElementById('boot-upload-canvas').getContext('2d');
+    ctx.clearRect(0, 0, BOOT_W, BOOT_H);
+    document.getElementById('boot-threshold-row').classList.add('hidden');
+    document.getElementById('boot-upload-preview').classList.add('hidden');
+    document.getElementById('boot-upload-actions').classList.add('hidden');
+    document.getElementById('bootimg-input').value = '';
+  });
+
+  function loadBootSections() {
+    if (!codeplug) return;
+    // Boot image
+    try {
+      const bytes = codeplug.bootImage;
+      const card  = document.getElementById('boot-current-card');
+      if (bytes && renderBootBytesToCanvas(bytes, document.getElementById('boot-current-canvas'))) {
+        card.classList.remove('hidden');
+      }
+    } catch (_) {}
+    // Enable save if image already pending (e.g. reload after partial edit)
+    if (bootPendingBits) document.getElementById('bootimg-save').disabled = false;
+    // Boot melody
+    try {
+      const entries = codeplug.bootTune;
+      if (entries.length) {
+        document.getElementById('melody-textarea').value =
+          entries.map(e => `${e.note}, ${e.dur}, ${e.pause}, ${e.vol}`).join('\n');
+      }
+    } catch (_) {}
+    updateMelodyStatus();
+  }
+
+  // ── Boot Melody ───────────────────────────────────────────────────────────
+
+  const MELODY_EXAMPLES = {
+    cq: `69, 3, 1, 10
+72, 3, 1, 10
+74, 3, 1, 10
+76, 6, 2, 12`,
+    jingle: `60, 2, 0, 10
+64, 2, 0, 10
+67, 2, 0, 10
+72, 5, 2, 12`,
+    sweep: `48, 1, 0, 8
+52, 1, 0, 8
+55, 1, 0, 8
+60, 1, 0, 10
+64, 1, 0, 10
+67, 1, 0, 10
+72, 4, 1, 12`,
+    roger: `74, 2, 0, 10
+76, 2, 0, 10
+72, 4, 1, 10`,
+  };
+
+  let audioCtx = null;
+  let playingOscs = [];
+
+  function parseMelody(text) {
+    const entries = [], errors = [];
+    text.split('\n').forEach((raw, i) => {
+      const line = raw.replace(/#.*$/, '').trim();
+      if (!line) return;
+      const parts = line.split(',').map(s => s.trim());
+      if (parts.length !== 4) { errors.push(`Line ${i+1}: expected 4 values`); return; }
+      const [note, dur, pause, vol] = parts.map(Number);
+      if ([note, dur, pause, vol].some(isNaN)) { errors.push(`Line ${i+1}: all values must be numbers`); return; }
+      if (note < 0 || note > 127)  { errors.push(`Line ${i+1}: note must be 0–127`); return; }
+      if (dur  < 1 || dur  > 255)  { errors.push(`Line ${i+1}: duration must be 1–255`); return; }
+      if (pause < 0 || pause > 255){ errors.push(`Line ${i+1}: pause must be 0–255`); return; }
+      if (vol  < 0 || vol  > 15)   { errors.push(`Line ${i+1}: volume must be 0–15`); return; }
+      entries.push({ note, dur, pause, vol });
+    });
+    return { entries, errors };
+  }
+
+  function updateMelodyStatus() {
+    const { entries, errors } = parseMelody(document.getElementById('melody-textarea').value || '');
+    const el = document.getElementById('melody-status');
+    if (errors.length) {
+      el.textContent = errors[0]; el.className = 'melody-status err';
+    } else if (entries.length > BOOT_TUNE_MAX) {
+      el.textContent = `${entries.length} notes — only the first ${BOOT_TUNE_MAX} will be saved`;
+      el.className = 'melody-status warn';
+    } else if (entries.length) {
+      el.textContent = `${entries.length} note${entries.length === 1 ? '' : 's'} — ready`;
+      el.className = 'melody-status ok';
+    } else {
+      el.textContent = ''; el.className = 'melody-status';
+    }
+    document.getElementById('melody-save').disabled = !codeplug || !!errors.length || !entries.length;
+  }
+
+  document.getElementById('melody-textarea').addEventListener('input', updateMelodyStatus);
+
+  document.getElementById('melody-examples').addEventListener('change', e => {
+    const data = MELODY_EXAMPLES[e.target.value];
+    if (data) { document.getElementById('melody-textarea').value = data; updateMelodyStatus(); }
+    e.target.value = '';
+  });
+
+  document.getElementById('melody-play').addEventListener('click', () => {
+    const { entries, errors } = parseMelody(document.getElementById('melody-textarea').value || '');
+    if (errors.length || !entries.length) return;
+    stopMelody();
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    document.getElementById('melody-play').classList.add('hidden');
+    document.getElementById('melody-stop').classList.remove('hidden');
+    let t = audioCtx.currentTime + 0.05;
+    let totalMs = 50;
+
+    entries.slice(0, BOOT_TUNE_MAX).forEach(({ note, dur, pause, vol }) => {
+      const noteSec  = dur   * 0.1;
+      const pauseSec = pause * 0.05;
+      totalMs += (noteSec + pauseSec) * 1000;
+      if (note > 0) {
+        const freq = 440 * Math.pow(2, (note - 69) / 12);
+        const gain = (vol / 15) * 0.2;
+        const osc  = audioCtx.createOscillator();
+        const gn   = audioCtx.createGain();
+        osc.connect(gn); gn.connect(audioCtx.destination);
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(freq, t);
+        gn.gain.setValueAtTime(0, t);
+        gn.gain.linearRampToValueAtTime(gain, t + 0.008);
+        gn.gain.setValueAtTime(gain, t + noteSec - 0.008);
+        gn.gain.linearRampToValueAtTime(0, t + noteSec);
+        osc.start(t); osc.stop(t + noteSec);
+        playingOscs.push(osc);
+      }
+      t += noteSec + pauseSec;
+    });
+
+    setTimeout(stopMelody, totalMs);
+  });
+
+  function stopMelody() {
+    playingOscs.forEach(o => { try { o.stop(); } catch (_) {} });
+    playingOscs = [];
+    if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+    document.getElementById('melody-play').classList.remove('hidden');
+    document.getElementById('melody-stop').classList.add('hidden');
+  }
+
+  document.getElementById('melody-stop').addEventListener('click', stopMelody);
+
+  document.getElementById('melody-save').addEventListener('click', () => {
+    if (!codeplug) return;
+    const { entries, errors } = parseMelody(document.getElementById('melody-textarea').value || '');
+    if (errors.length || !entries.length) return;
+    codeplug.writeBootTune(entries.slice(0, BOOT_TUNE_MAX));
+    const btn = document.getElementById('melody-save');
+    const orig = btn.textContent;
+    btn.textContent = 'Saved!';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  });
 
   // ── New Codeplug Wizard ───────────────────────────────────────────────────
 

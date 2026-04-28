@@ -939,6 +939,163 @@ table.cps-table tbody tr:hover .drag-handle { color: var(--muted); }
 tr.dragging { opacity: 0.35; }
 tr.drag-over td { box-shadow: inset 0 2px 0 var(--blue) !important; }
 
+/* ── Boot Screen & Melody panels ─────────────────────────────────────────── */
+
+.boot-panel,
+.melody-panel {
+  overflow-y: auto;
+  padding: 20px 24px 40px;
+}
+
+.section-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.section-card-header {
+  background: #192235;
+  border-bottom: 1px solid var(--border);
+  padding: 9px 16px;
+}
+
+.section-card-header h3 {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.section-card-body { padding: 18px 16px; }
+
+.section-desc {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.65;
+  margin-bottom: 16px;
+}
+
+.section-desc code {
+  background: rgba(255,255,255,.07);
+  border-radius: 3px;
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', monospace;
+  font-size: 0.8rem;
+  padding: 1px 5px;
+}
+
+/* Boot image */
+.boot-upload-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.boot-upload-hint {
+  color: var(--locked-text);
+  font-size: 0.78rem;
+}
+
+.boot-threshold-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.boot-threshold-label {
+  color: var(--muted);
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  min-width: 110px;
+}
+
+.boot-slider {
+  accent-color: var(--blue);
+  flex: 1;
+  max-width: 200px;
+}
+
+.boot-threshold-num {
+  color: var(--muted);
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', monospace;
+  font-size: 0.8rem;
+  min-width: 28px;
+  text-align: right;
+}
+
+.boot-canvas-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 12px 0 4px;
+}
+
+.boot-canvas {
+  border: 1px solid var(--border);
+  display: block;
+  height: 256px;   /* 2× native */
+  image-rendering: pixelated;
+  width: 320px;    /* 2× native */
+}
+
+.boot-canvas-label {
+  color: var(--locked-text);
+  font-size: 0.72rem;
+  margin-top: 6px;
+  text-align: center;
+}
+
+.boot-action-row,
+.section-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+/* Melody editor */
+.melody-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.melody-textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-sizing: border-box;
+  color: var(--text);
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', monospace;
+  font-size: 0.85rem;
+  line-height: 1.7;
+  outline: none;
+  padding: 10px 12px;
+  resize: vertical;
+  transition: border-color .15s;
+  width: 100%;
+}
+
+.melody-textarea:focus  { border-color: var(--blue); }
+.melody-textarea::placeholder { color: var(--locked-text); font-style: italic; }
+
+.melody-status {
+  font-size: 0.78rem;
+  margin-top: 6px;
+  min-height: 1.2em;
+}
+
+.melody-status.ok   { color: #86efac; }
+.melody-status.warn { color: #fde68a; }
+.melody-status.err  { color: #fca5a5; }
+
 /* Wizard footer */
 .wizard-footer {
   align-items: center;

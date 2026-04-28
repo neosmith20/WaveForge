@@ -8,6 +8,8 @@ const ADDR = {
   GENERAL_SETTINGS: 0x00E0,   // radioName[8] + radioId[4]
   CHAN_BITMAP:       0x3780,   // 16 bytes, bits 0..127 = channels 1..128
   CHANNELS:          0x3790,   // 56 bytes each
+  BOOT_IMAGE:        0x6B40,   // 2560 bytes, 160×128 px 1bpp row-major MSB-first (estimated — verify vs firmware)
+  BOOT_TUNE:         0x7518,   // ≤10 × 4-byte entries [note,dur,pause,vol], 0xFF-terminated
   BOOT_LINE1:        0x7540,
   BOOT_LINE2:        0x7550,
   VFO_A:             0x7590,
@@ -28,6 +30,12 @@ const CHANNELS_MAX = 128;
 const ZONES_MAX    = 68;
 const CONTACTS_MAX = 1024;
 const RXG_MAX      = 76;
+
+const BOOT_IMAGE_W    = 160;
+const BOOT_IMAGE_H    = 128;
+const BOOT_IMAGE_SIZE = BOOT_IMAGE_W * BOOT_IMAGE_H / 8;  // 2560 bytes
+const BOOT_TUNE_MAX   = 10;
+const BOOT_TUNE_ENTRY = 4;
 
 const CSS_DCS          = 0x8000;
 const CSS_DCS_INVERTED = 0x4000;
@@ -445,6 +453,57 @@ class CodeplugParser {
     }
     this._rxGroups = result;
     return result;
+  }
+
+  // ── Boot tune ─────────────────────────────────────────────────────────────────
+
+  get bootTune() {
+    const v       = this.view;
+    const entries = [];
+    for (let i = 0; i < BOOT_TUNE_MAX; i++) {
+      const base = ADDR.BOOT_TUNE + i * BOOT_TUNE_ENTRY;
+      const note = v.getUint8(base);
+      if (note === 0xFF) break;
+      entries.push({
+        note,
+        dur:   v.getUint8(base + 1),
+        pause: v.getUint8(base + 2),
+        vol:   v.getUint8(base + 3),
+      });
+    }
+    return entries;
+  }
+
+  writeBootTune(entries) {
+    const v = this.view;
+    const n = Math.min(entries.length, BOOT_TUNE_MAX);
+    for (let i = 0; i < BOOT_TUNE_MAX; i++) {
+      const base = ADDR.BOOT_TUNE + i * BOOT_TUNE_ENTRY;
+      if (i < n) {
+        v.setUint8(base,     entries[i].note  & 0xFF);
+        v.setUint8(base + 1, entries[i].dur   & 0xFF);
+        v.setUint8(base + 2, entries[i].pause & 0xFF);
+        v.setUint8(base + 3, entries[i].vol   & 0xFF);
+      } else {
+        v.setUint8(base, 0xFF); v.setUint8(base+1, 0xFF);
+        v.setUint8(base+2, 0xFF); v.setUint8(base+3, 0xFF);
+      }
+    }
+  }
+
+  // ── Boot image ────────────────────────────────────────────────────────────────
+
+  get bootImage() {
+    const end = ADDR.BOOT_IMAGE + BOOT_IMAGE_SIZE;
+    if (end > this.buf.byteLength) return null;
+    const bytes = new Uint8Array(this.buf, ADDR.BOOT_IMAGE, BOOT_IMAGE_SIZE);
+    return bytes.every(b => b === 0xFF) ? null : bytes.slice();
+  }
+
+  writeBootImage(bits) {
+    const v = this.view;
+    const n = Math.min(bits.length, BOOT_IMAGE_SIZE);
+    for (let i = 0; i < n; i++) v.setUint8(ADDR.BOOT_IMAGE + i, bits[i]);
   }
 
   // ── Serialise ─────────────────────────────────────────────────────────────────
