@@ -14,16 +14,23 @@
 // Response on success: ['R', len_hi, len_lo, data...]
 // Response on error:   ['-']
 //
-// Codeplug file layout (128 KB):
-//   file[0x00000..0x0FFFF]  → EEPROM region  (CPS_ACCESS_EEPROM, hw addr = file addr)
+// Codeplug file layout (128 KB) and read strategy:
+//
+//   file[0x00000..0x07FFF]  → EEPROM lower half  (CPS_ACCESS_EEPROM, hw addr = file addr)
+//                             Channels, general settings, channel bitmap live here.
+//                             area=2 (EEPROM) correctly covers this 32 KB range.
+//
+//   file[0x08000..0x0FFFF]  → EEPROM upper half  (CPS_ACCESS_FLASH, hw addr = file addr)
+//                             Zone bitmap and zone list live here.
+//                             area=2 returns errors above 0x7FFF on radios where the
+//                             EEPROM area aliases only the lower 32 KB of SPI Flash.
+//                             Must be read via area=1 (SPI Flash) at the same hw addr —
+//                             the write command ('X') places this data at SPI Flash 0x8000+.
+//
 //   file[0x10000..0x1FFFF]  → SPI Flash region (CPS_ACCESS_FLASH, hw addr = file addr + 0x90000)
-//
-// The 0x90000 offset for the SPI Flash region =
-//   FLASH_ADDRESS_OFFSET (0x20000 for MDUV380/RT84/DM1701, codeplug.h line 159) + 0x70000
-//
-// Example: CONTACTS live at FLASH_ADDRESS_OFFSET + CODEPLUG_ADDR_CONTACTS
-//   = 0x20000 + 0x87620 = 0xA7620 in SPI Flash
-//   = 0xA7620 - 0x90000 = 0x17620 in the codeplug file  ✓
+//                             Contacts, RX groups live here.
+//                             0x90000 = FLASH_ADDRESS_OFFSET(0x20000) + 0x70000 (codeplug.h)
+//                             CONTACTS: hw 0x20000 + 0x87620 = 0xA7620 → file 0x17620  ✓
 
 const CPRD_SERIAL_FILTERS = [{ usbVendorId: 0x1FC9, usbProductId: 0x0094 }];
 
@@ -32,8 +39,9 @@ const CPRD_AREA_FLASH     = 1;
 const CPRD_CHUNK          = 1024;       // bytes per request (firmware cap: 2045)
 const CPRD_FILE_SIZE      = 0x20000;    // 128 KB
 const CPRD_HALF           = CPRD_FILE_SIZE >>> 1;   // 64 KB per region
+const CPRD_QUARTER        = CPRD_HALF  >>> 1;       // 32 KB — EEPROM alias boundary
 
-// SPI Flash hw base address for the second (SPI Flash) region.
+// SPI Flash hw base address for the third (SPI Flash) region.
 // = file offset 0x10000 + FLASH_ADDRESS_OFFSET(0x20000) + 0x70000 = 0xA0000
 const CPRD_FLASH_HW_BASE  = 0xA0000;
 
@@ -105,13 +113,15 @@ async function cpwrReadCodeplug(onProgress) {
     writer = port.writable.getWriter();
     acc    = new SerialAccumulator(port.readable.getReader());
 
-    const totalChunks = Math.ceil(CPRD_HALF / CPRD_CHUNK) * 2;
+    // Three logical regions; total chunks stays 128 (same time budget as before).
+    const totalChunks = Math.ceil(CPRD_QUARTER / CPRD_CHUNK) * 2 +
+                        Math.ceil(CPRD_HALF    / CPRD_CHUNK);
     let chunksDone = 0;
     let chunksFailed = 0;
 
-    const readRegion = async (areaType, hwBase, fileBase, label) => {
-      for (let i = 0; i < CPRD_HALF; i += CPRD_CHUNK) {
-        const len  = Math.min(CPRD_CHUNK, CPRD_HALF - i);
+    const readRegion = async (areaType, hwBase, fileBase, regionLen, label) => {
+      for (let i = 0; i < regionLen; i += CPRD_CHUNK) {
+        const len  = Math.min(CPRD_CHUNK, regionLen - i);
         const data = await cprdRequest(writer, acc, areaType, hwBase + i, len);
         if (data) {
           fileBuf.set(data.subarray(0, len), fileBase + i);
@@ -124,11 +134,17 @@ async function cpwrReadCodeplug(onProgress) {
       }
     };
 
+    // Lower EEPROM (channels, settings) — area=2 works here.
     onProgress({ phase: 'read', pct: 0, msg: 'Reading EEPROM region…' });
-    await readRegion(CPRD_AREA_EEPROM, 0x0000, 0x00000, 'EEPROM');
+    await readRegion(CPRD_AREA_EEPROM, 0x00000, 0x00000, CPRD_QUARTER, 'EEPROM');
 
+    // Upper EEPROM (zones) — area=2 errors above 0x7FFF; read via SPI Flash instead.
+    onProgress({ phase: 'read', pct: 25, msg: 'Reading zone region…' });
+    await readRegion(CPRD_AREA_FLASH, 0x08000, 0x08000, CPRD_QUARTER, 'zones');
+
+    // SPI Flash region (contacts, RX groups).
     onProgress({ phase: 'read', pct: 50, msg: 'Reading SPI Flash region…' });
-    await readRegion(CPRD_AREA_FLASH, CPRD_FLASH_HW_BASE, CPRD_HALF, 'SPI Flash');
+    await readRegion(CPRD_AREA_FLASH, CPRD_FLASH_HW_BASE, CPRD_HALF, CPRD_HALF, 'SPI Flash');
 
     // If the vast majority of reads returned device errors, something is wrong
     // with the connection rather than the radio just having blank areas.
