@@ -1,6 +1,6 @@
 'use strict';
 
-// ─── Address map (file offsets, verified against W0PWR_0223_0302.g77) ─────────
+// ─── Address map (file offsets, verified against DM-1701 codeplug format) ──────
 // EEPROM region: file_offset = hardware_addr (direct)
 // SPI flash region: file_offset = hardware_addr - 0x70000
 const ADDR = {
@@ -258,6 +258,56 @@ class CodeplugParser {
     v.setUint8(ADDR.CHAN_BITMAP + bi, v.getUint8(ADDR.CHAN_BITMAP + bi) & ~(1 << (slotIndex % 8)));
     fillFF(v, ADDR.CHANNELS + slotIndex * CHANNEL_STRUCT_SIZE, CHANNEL_STRUCT_SIZE);
     this._channels = null;
+  }
+
+  reorderChannels(newSlotOrder) {
+    // newSlotOrder: array of old slotIndex values in the desired new order.
+    // Channels are packed into consecutive slots 0..N-1; zone references are remapped.
+    const v = this.view;
+    const n = newSlotOrder.length;
+
+    // Snapshot raw bytes before touching anything to avoid read-after-write aliasing
+    const snapshots = newSlotOrder.map(slot => {
+      const start = ADDR.CHANNELS + slot * CHANNEL_STRUCT_SIZE;
+      return new Uint8Array(this.buf.slice(start, start + CHANNEL_STRUCT_SIZE));
+    });
+
+    // old 1-based channel number → new 1-based channel number
+    const oldNumToNew = {};
+    newSlotOrder.forEach((oldSlot, newIdx) => { oldNumToNew[oldSlot + 1] = newIdx + 1; });
+
+    // Clear every currently active slot
+    for (let i = 0; i < CHANNELS_MAX; i++) {
+      const bi = Math.floor(i / 8);
+      if (v.getUint8(ADDR.CHAN_BITMAP + bi) & (1 << (i % 8))) {
+        v.setUint8(ADDR.CHAN_BITMAP + bi, v.getUint8(ADDR.CHAN_BITMAP + bi) & ~(1 << (i % 8)));
+        fillFF(v, ADDR.CHANNELS + i * CHANNEL_STRUCT_SIZE, CHANNEL_STRUCT_SIZE);
+      }
+    }
+
+    // Write channels to consecutive slots 0..N-1
+    snapshots.forEach((raw, newIdx) => {
+      const dst = ADDR.CHANNELS + newIdx * CHANNEL_STRUCT_SIZE;
+      for (let j = 0; j < CHANNEL_STRUCT_SIZE; j++) v.setUint8(dst + j, raw[j]);
+      const bi = Math.floor(newIdx / 8);
+      v.setUint8(ADDR.CHAN_BITMAP + bi, v.getUint8(ADDR.CHAN_BITMAP + bi) | (1 << (newIdx % 8)));
+    });
+
+    // Remap zone channel-list entries to new numbers
+    for (let i = 0; i < ZONES_MAX; i++) {
+      const bi = Math.floor(i / 8);
+      if (!(v.getUint8(ADDR.ZONE_BITMAP + bi) & (1 << (i % 8)))) continue;
+      const base = ADDR.ZONE_LIST + i * ZONE_STRUCT_SIZE;
+      for (let j = 0; j < 80; j++) {
+        const ref = v.getUint16(base + 16 + j * 2, true);
+        if (ref === 0 || ref === 0xFFFF) break;
+        const mapped = oldNumToNew[ref];
+        if (mapped !== undefined) v.setUint16(base + 16 + j * 2, mapped, true);
+      }
+    }
+
+    this._channels = null;
+    this._zones    = null;
   }
 
   // ── Zones ────────────────────────────────────────────────────────────────────

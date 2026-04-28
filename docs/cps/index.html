@@ -102,11 +102,19 @@
         <div class="table-toolbar">
           <input type="text" class="search-input" id="search-channels" placeholder="Filter channels&hellip;">
           <button class="btn-sm btn-sm-outline" id="add-channel-btn" type="button">+ Add Channel</button>
+          <div class="sort-group">
+            <span class="sort-label">Sort:</span>
+            <button class="btn-sm btn-sm-outline btn-sort-ch" data-sort="name"     type="button">Name A-Z</button>
+            <button class="btn-sm btn-sm-outline btn-sort-ch" data-sort="mode-fm"  type="button">FM first</button>
+            <button class="btn-sm btn-sm-outline btn-sort-ch" data-sort="mode-dmr" type="button">DMR first</button>
+            <button class="btn-sm btn-sm-outline btn-sort-ch" data-sort="freq"     type="button">Frequency</button>
+          </div>
           <span class="row-count" id="rc-channels"></span>
         </div>
         <table class="cps-table">
           <thead>
             <tr>
+              <th class="col-drag"></th>
               <th class="col-num">#</th>
               <th>Name</th>
               <th>Mode</th>
@@ -390,8 +398,8 @@
         <h4 class="wiz-title">What&rsquo;s your callsign?</h4>
         <p class="wiz-hint">
           Your callsign is your radio identity &mdash; it&rsquo;s stored in the radio and shown on other
-          operators&rsquo; screens when you transmit. If you don&rsquo;t have a licence yet, you can
-          leave this blank and fill it in later.
+          operators&rsquo; screens when you transmit. It&rsquo;s issued by your country&rsquo;s
+          telecommunications authority (FCC in the USA, Ofcom in the UK, etc.).
         </p>
         <input type="text" id="wiz-callsign" class="wiz-input" maxlength="8"
                placeholder="e.g. KF0ABC" autocomplete="off" autocorrect="off" spellcheck="false">
@@ -425,26 +433,11 @@
           This is used to name your saved file. The codeplug format is identical across
           all three radios &mdash; you can use the same file on any of them.
         </p>
-        <div class="model-cards">
-          <label class="model-card">
-            <input type="radio" name="wiz-model" value="DM1701" checked>
-            <div class="model-card-body">
-              <span class="model-name">Baofeng DM-1701</span>
-            </div>
-          </label>
-          <label class="model-card">
-            <input type="radio" name="wiz-model" value="MDUV380">
-            <div class="model-card-body">
-              <span class="model-name">TYT MD-UV380</span>
-            </div>
-          </label>
-          <label class="model-card">
-            <input type="radio" name="wiz-model" value="RT84">
-            <div class="model-card-body">
-              <span class="model-name">Retevis RT84</span>
-            </div>
-          </label>
-        </div>
+        <select id="wiz-model" class="wiz-select">
+          <option value="DM1701">Baofeng DM-1701</option>
+          <option value="MDUV380">TYT MD-UV380</option>
+          <option value="RT84">Retevis RT84</option>
+        </select>
       </div>
 
     </div><!-- /.wizard-body -->
@@ -687,6 +680,22 @@
 
   // ── Channel table ──────────────────────────────────────────────────────────
 
+  let dragSrcRow     = null;
+  let didDragChannel = false;
+
+  function commitChannelReorder(srcRow, dstRow) {
+    const rows = [...tbodies.channels.querySelectorAll('tr')];
+    const si   = rows.indexOf(srcRow);
+    const di   = rows.indexOf(dstRow);
+    if (si < 0 || di < 0 || si === di) return;
+    const order = rows.map(r => parseInt(r.dataset.slotIndex, 10));
+    const [moved] = order.splice(si, 1);
+    order.splice(di, 0, moved);
+    codeplug.reorderChannels(order);
+    refreshChannels();
+    refreshZones();
+  }
+
   function renderChannels(channels) {
     const tbody   = tbodies.channels;
     tbody.innerHTML = '';
@@ -696,20 +705,52 @@
 
     channels.forEach(ch => {
       const tr = document.createElement('tr');
-      tr.style.cursor = 'pointer';
+      tr.style.cursor      = 'pointer';
+      tr.draggable         = true;
+      tr.dataset.slotIndex = ch.slotIndex;
+
+      tr.addEventListener('dragstart', e => {
+        if (!e.target.closest('.drag-handle')) { e.preventDefault(); return; }
+        dragSrcRow = tr;
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => tr.classList.add('dragging'), 0);
+      });
+      tr.addEventListener('dragend', () => {
+        tr.classList.remove('dragging');
+        tbodies.channels.querySelectorAll('.drag-over').forEach(r => r.classList.remove('drag-over'));
+        dragSrcRow = null;
+        didDragChannel = true;
+        setTimeout(() => { didDragChannel = false; }, 80);
+      });
+      tr.addEventListener('dragover', e => {
+        if (!dragSrcRow || dragSrcRow === tr) return;
+        e.preventDefault();
+        tbodies.channels.querySelectorAll('.drag-over').forEach(r => r.classList.remove('drag-over'));
+        tr.classList.add('drag-over');
+      });
+      tr.addEventListener('dragleave', e => {
+        if (!e.relatedTarget || !tr.contains(e.relatedTarget)) tr.classList.remove('drag-over');
+      });
+      tr.addEventListener('drop', e => {
+        if (!dragSrcRow || dragSrcRow === tr) return;
+        e.preventDefault();
+        tr.classList.remove('drag-over');
+        commitChannelReorder(dragSrcRow, tr);
+      });
       tr.addEventListener('click', e => {
-        if (e.target.closest('.btn-row-delete')) return;
+        if (didDragChannel || e.target.closest('.btn-row-delete') || e.target.closest('.drag-handle')) return;
         openModal('channel', ch);
       });
 
-      const tsCC = ch.mode === 'DMR'
+      const tsCC    = ch.mode === 'DMR'
         ? `<span class="badge badge-ts">TS${ch.timeslot}</span> CC${ch.colorCode}` : '—';
-      const bw   = ch.mode === 'FM' ? `<span class="badge">${ch.bandwidth}</span>` : '—';
-      const tone = ch.css ? `<span class="css-tone">${ch.css.kind}: ${ch.css.value}</span>` : '—';
-      const flags = ch.rxOnly ? '<span class="badge badge-rxonly">RX</span>' : '—';
+      const bw      = ch.mode === 'FM' ? `<span class="badge">${ch.bandwidth}</span>` : '—';
+      const tone    = ch.css ? `<span class="css-tone">${ch.css.kind}: ${ch.css.value}</span>` : '—';
+      const flags   = ch.rxOnly ? '<span class="badge badge-rxonly">RX</span>' : '—';
       const contact = (ch.mode === 'DMR' && ch.contactIdx) ? escHtml(contactName(ch.contactIdx)) : '—';
 
       tr.innerHTML = `
+        <td class="col-drag"><span class="drag-handle" title="Drag to reorder">&#x283F;</span></td>
         <td class="col-num">${ch.number}</td>
         <td class="col-name">${escHtml(ch.name)}</td>
         <td><span class="badge badge-${ch.mode.toLowerCase()}">${ch.mode}</span></td>
@@ -732,6 +773,23 @@
       tbody.appendChild(tr);
     });
   }
+
+  // ── Sort buttons ──────────────────────────────────────────────────────────
+
+  document.querySelectorAll('.btn-sort-ch').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!codeplug) return;
+      const channels = [...codeplug.channels];
+      const by = btn.dataset.sort;
+      if      (by === 'name')     channels.sort((a, b) => a.name.localeCompare(b.name));
+      else if (by === 'mode-fm')  channels.sort((a, b) => a.mode === b.mode ? 0 : a.mode === 'FM'  ? -1 : 1);
+      else if (by === 'mode-dmr') channels.sort((a, b) => a.mode === b.mode ? 0 : a.mode === 'DMR' ? -1 : 1);
+      else if (by === 'freq')     channels.sort((a, b) => parseFloat(a.rxMHz) - parseFloat(b.rxMHz));
+      codeplug.reorderChannels(channels.map(ch => ch.slotIndex));
+      refreshChannels();
+      refreshZones();
+    });
+  });
 
   // ── Zone table ────────────────────────────────────────────────────────────
 
@@ -1109,7 +1167,7 @@
     wizStep = 1;
     document.getElementById('wiz-callsign').value = '';
     document.getElementById('wiz-dmrid').value    = '';
-    document.querySelector('input[name="wiz-model"][value="DM1701"]').checked = true;
+    document.getElementById('wiz-model').value = 'DM1701';
     syncWizardStep();
     wizardModal.showModal();
   }
@@ -1175,7 +1233,7 @@
   function createFromWizard() {
     const callsign = document.getElementById('wiz-callsign').value.trim().toUpperCase().substring(0, 8);
     const dmrId    = parseInt(document.getElementById('wiz-dmrid').value, 10) || 0;
-    const model    = document.querySelector('input[name="wiz-model"]:checked').value;
+    const model    = document.getElementById('wiz-model').value;
     const names    = { DM1701: 'DM-1701', MDUV380: 'MD-UV380', RT84: 'RT84' };
 
     codeplug          = CodeplugParser.createBlank();
