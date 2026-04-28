@@ -7,7 +7,7 @@
 //
 // Request packet (8 bytes):
 //   [0]    'R' (0x52)
-//   [1]    area: 1=SPI Flash, 2=EEPROM (EEPROM is aliased to SPI Flash at offset 0)
+//   [1]    area: 1=SPI Flash, 2=EEPROM (EEPROM aliases to SPI Flash at offset 0 for MDUV380)
 //   [2..5] address (big-endian uint32)
 //   [6..7] length  (big-endian uint16, max 2045)
 //
@@ -15,20 +15,30 @@
 // Response on error:   ['-']
 //
 // Codeplug file layout (128 KB):
-//   file[0x00000..0x0FFFF]  → EEPROM via CPS_ACCESS_EEPROM (hw addr = file addr)
-//   file[0x10000..0x1FFFF]  → SPI Flash via CPS_ACCESS_FLASH (hw addr = file addr + 0x70000)
+//   file[0x00000..0x0FFFF]  → EEPROM region  (CPS_ACCESS_EEPROM, hw addr = file addr)
+//   file[0x10000..0x1FFFF]  → SPI Flash region (CPS_ACCESS_FLASH, hw addr = file addr + 0x90000)
+//
+// The 0x90000 offset for the SPI Flash region =
+//   FLASH_ADDRESS_OFFSET (0x20000 for MDUV380/RT84/DM1701, codeplug.h line 159) + 0x70000
+//
+// Example: CONTACTS live at FLASH_ADDRESS_OFFSET + CODEPLUG_ADDR_CONTACTS
+//   = 0x20000 + 0x87620 = 0xA7620 in SPI Flash
+//   = 0xA7620 - 0x90000 = 0x17620 in the codeplug file  ✓
 
 const CPRD_SERIAL_FILTERS = [{ usbVendorId: 0x1FC9, usbProductId: 0x0094 }];
 
 const CPRD_AREA_EEPROM    = 2;
 const CPRD_AREA_FLASH     = 1;
-const CPRD_CHUNK          = 1024;      // bytes per request  (firmware cap: 2045)
-const CPRD_FILE_SIZE      = 0x20000;   // 128 KB total
-const CPRD_HALF           = CPRD_FILE_SIZE >>> 1;  // 64 KB per region
-const CPRD_FLASH_HW_BASE  = 0x80000;  // SPI Flash hw address of the second region
+const CPRD_CHUNK          = 1024;       // bytes per request (firmware cap: 2045)
+const CPRD_FILE_SIZE      = 0x20000;    // 128 KB
+const CPRD_HALF           = CPRD_FILE_SIZE >>> 1;   // 64 KB per region
 
-// Accumulate bytes from the serial readable stream, keeping a leftover buffer
-// so that chunk-boundary splits never lose data.
+// SPI Flash hw base address for the second (SPI Flash) region.
+// = file offset 0x10000 + FLASH_ADDRESS_OFFSET(0x20000) + 0x70000 = 0xA0000
+const CPRD_FLASH_HW_BASE  = 0xA0000;
+
+// Accumulate bytes from the Web Serial readable stream, preserving leftover bytes
+// across reads so USB packet boundaries never split a logical response.
 class SerialAccumulator {
   constructor(reader) {
     this._reader  = reader;
@@ -55,7 +65,7 @@ class SerialAccumulator {
   releaseLock() { this._reader.releaseLock(); }
 }
 
-// Send one CPS 'R' request and return the data bytes, or null on device error.
+// Send one CPS 'R' request; return the data bytes or null on a device error response.
 async function cprdRequest(writer, acc, areaType, hwAddr, length) {
   const req = new Uint8Array(8);
   req[0] = 0x52; // 'R'
@@ -69,7 +79,7 @@ async function cprdRequest(writer, acc, areaType, hwAddr, length) {
   await writer.write(req);
 
   const status = await acc.readExact(1);
-  if (status[0] !== 0x52) return null;           // '-' = device error
+  if (status[0] !== 0x52) return null;  // '-' = device error for this chunk
   const lenBytes = await acc.readExact(2);
   const respLen  = (lenBytes[0] << 8) | lenBytes[1];
   return acc.readExact(respLen);
@@ -96,15 +106,20 @@ async function cpwrReadCodeplug(onProgress) {
     acc    = new SerialAccumulator(port.readable.getReader());
 
     const totalChunks = Math.ceil(CPRD_HALF / CPRD_CHUNK) * 2;
-    let done = 0;
+    let chunksDone = 0;
+    let chunksFailed = 0;
 
     const readRegion = async (areaType, hwBase, fileBase, label) => {
       for (let i = 0; i < CPRD_HALF; i += CPRD_CHUNK) {
-        const len    = Math.min(CPRD_CHUNK, CPRD_HALF - i);
-        const data   = await cprdRequest(writer, acc, areaType, hwBase + i, len);
-        if (data) fileBuf.set(data.subarray(0, len), fileBase + i);
-        done++;
-        const pct = Math.round((done / totalChunks) * 100);
+        const len  = Math.min(CPRD_CHUNK, CPRD_HALF - i);
+        const data = await cprdRequest(writer, acc, areaType, hwBase + i, len);
+        if (data) {
+          fileBuf.set(data.subarray(0, len), fileBase + i);
+        } else {
+          chunksFailed++;
+        }
+        chunksDone++;
+        const pct = Math.round((chunksDone / totalChunks) * 100);
         onProgress({ phase: 'read', pct, msg: `Reading ${label}… ${pct}%` });
       }
     };
@@ -115,16 +130,21 @@ async function cpwrReadCodeplug(onProgress) {
     onProgress({ phase: 'read', pct: 50, msg: 'Reading SPI Flash region…' });
     await readRegion(CPRD_AREA_FLASH, CPRD_FLASH_HW_BASE, CPRD_HALF, 'SPI Flash');
 
-    // Sanity check — GENERAL_SETTINGS at 0x00E0 should not be blank flash
-    if (fileBuf.slice(0x00E0, 0x00EC).every(b => b === 0xFF)) {
-      throw new Error('Codeplug area is blank or unreadable. Is the radio powered on normally (not in DFU mode)?');
+    // If the vast majority of reads returned device errors, something is wrong
+    // with the connection rather than the radio just having blank areas.
+    if (chunksFailed > totalChunks * 0.9) {
+      throw new Error(
+        `Radio returned errors on ${chunksFailed}/${totalChunks} reads. ` +
+        `Ensure the radio is powered on normally (not in DFU mode) and ` +
+        `this browser has permission to access it.`
+      );
     }
 
     return fileBuf.buffer;
 
   } finally {
-    if (acc)    { try { acc.releaseLock();      } catch (_) {} }
-    if (writer) { try { writer.releaseLock();   } catch (_) {} }
-    if (port)   { try { await port.close();     } catch (_) {} }
+    if (acc)    { try { acc.releaseLock();    } catch (_) {} }
+    if (writer) { try { writer.releaseLock(); } catch (_) {} }
+    if (port)   { try { await port.close();   } catch (_) {} }
   }
 }
