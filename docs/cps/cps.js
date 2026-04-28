@@ -14,15 +14,15 @@ const ADDR = {
   BOOT_LINE2:        0x7550,
   VFO_A:             0x7590,
   ZONE_BITMAP:       0x8010,   // 32 bytes
-  ZONE_LIST:         0x8030,   // 176 bytes each
+  ZONE_LIST:         0x8030,   // 48 bytes each (16-ch format) or 176 bytes (80-ch format)
+  ZONE_FMT_PROBE:    0x806F,   // detection byte: ≤0x04 → 80-ch format, else 16-ch format
   CONTACTS:          0x17620,  // 24 bytes each (hw 0x87620 - 0x70000)
   RXG_LEN:           0x1D620,
   RXG_DATA:          0x1D6A0,
 };
 
-const CHANNEL_STRUCT_SIZE = 56;
-const ZONE_STRUCT_SIZE    = 176;
-const CONTACT_STRUCT_SIZE = 24;
+const CHANNEL_STRUCT_SIZE  = 56;
+const CONTACT_STRUCT_SIZE  = 24;
 const RXG_LEN_SIZE        = 3;
 const RXG_DATA_SIZE       = 82;
 
@@ -148,6 +148,24 @@ class CodeplugParser {
     this._zones    = null;
     this._contacts = null;
     this._rxGroups = null;
+
+    // Detect zone format using the same probe byte the firmware uses in
+    // codeplugInitChannelsPerZone(): EEPROM 0x806F.
+    //
+    // 16-ch format (original): 0x806F is the last byte of zone 1's name —
+    //   it is 0xFF (padding) or a printable ASCII char (≥ 0x20), never ≤ 0x04.
+    // 80-ch format (OpenGD77 extended): 0x806F is the upper byte of channel
+    //   index 23 in zone 0's list — max channel index is 1024 (0x400) so the
+    //   upper byte is always 0x00–0x04.
+    const probeByte = this.view.getUint8(ADDR.ZONE_FMT_PROBE);
+    this._channelsPerZone = (probeByte <= 0x04) ? 80 : 16;
+    this._zoneStructSize  = 16 + this._channelsPerZone * 2;  // 48 or 176
+  }
+
+  // ── Zone format ───────────────────────────────────────────────────────────────
+
+  get zoneFormat() {
+    return this._channelsPerZone === 80 ? 'opengd77' : 'original';
   }
 
   // ── General settings ─────────────────────────────────────────────────────────
@@ -305,8 +323,8 @@ class CodeplugParser {
     for (let i = 0; i < ZONES_MAX; i++) {
       const bi = Math.floor(i / 8);
       if (!(v.getUint8(ADDR.ZONE_BITMAP + bi) & (1 << (i % 8)))) continue;
-      const base = ADDR.ZONE_LIST + i * ZONE_STRUCT_SIZE;
-      for (let j = 0; j < 80; j++) {
+      const base = ADDR.ZONE_LIST + i * this._zoneStructSize;
+      for (let j = 0; j < this._channelsPerZone; j++) {
         const ref = v.getUint16(base + 16 + j * 2, true);
         if (ref === 0 || ref === 0xFFFF) break;
         const mapped = oldNumToNew[ref];
@@ -327,7 +345,7 @@ class CodeplugParser {
     for (let i = 0; i < ZONES_MAX; i++) {
       const bi = Math.floor(i / 8);
       if (!(v.getUint8(ADDR.ZONE_BITMAP + bi) & (1 << (i % 8)))) continue;
-      result.push(this._decodeZone(v, ADDR.ZONE_LIST + i * ZONE_STRUCT_SIZE, i + 1, i));
+      result.push(this._decodeZone(v, ADDR.ZONE_LIST + i * this._zoneStructSize, i + 1, i));
     }
     this._zones = result;
     return result;
@@ -336,7 +354,7 @@ class CodeplugParser {
   _decodeZone(v, base, number, slotIndex) {
     const name     = readString(v, base, 16);
     const channels = [];
-    for (let j = 0; j < 80; j++) {
+    for (let j = 0; j < this._channelsPerZone; j++) {
       const idx = v.getUint16(base + 16 + j * 2, true);
       if (idx === 0 || idx === 0xFFFF) break;
       channels.push(idx);
@@ -346,9 +364,9 @@ class CodeplugParser {
 
   writeZone(zone) {
     const v    = this.view;
-    const base = ADDR.ZONE_LIST + zone.slotIndex * ZONE_STRUCT_SIZE;
+    const base = ADDR.ZONE_LIST + zone.slotIndex * this._zoneStructSize;
     writeString(v, base, 16, zone.name);
-    for (let j = 0; j < 80; j++) {
+    for (let j = 0; j < this._channelsPerZone; j++) {
       v.setUint16(base + 16 + j * 2, j < zone.channels.length ? zone.channels[j] : 0, true);
     }
     const bi = Math.floor(zone.slotIndex / 8);
@@ -360,7 +378,7 @@ class CodeplugParser {
     for (let i = 0; i < ZONES_MAX; i++) {
       const bi = Math.floor(i / 8);
       if (!(this.view.getUint8(ADDR.ZONE_BITMAP + bi) & (1 << (i % 8)))) {
-        fillFF(this.view, ADDR.ZONE_LIST + i * ZONE_STRUCT_SIZE, ZONE_STRUCT_SIZE);
+        fillFF(this.view, ADDR.ZONE_LIST + i * this._zoneStructSize, this._zoneStructSize);
         return i;
       }
     }
@@ -371,7 +389,7 @@ class CodeplugParser {
     const v  = this.view;
     const bi = Math.floor(slotIndex / 8);
     v.setUint8(ADDR.ZONE_BITMAP + bi, v.getUint8(ADDR.ZONE_BITMAP + bi) & ~(1 << (slotIndex % 8)));
-    fillFF(v, ADDR.ZONE_LIST + slotIndex * ZONE_STRUCT_SIZE, ZONE_STRUCT_SIZE);
+    fillFF(v, ADDR.ZONE_LIST + slotIndex * this._zoneStructSize, this._zoneStructSize);
     this._zones = null;
   }
 
@@ -542,6 +560,9 @@ class CodeplugParser {
     // Zero bitmaps so no channels or zones appear as used
     for (let i = 0; i < 16; i++) view.setUint8(ADDR.CHAN_BITMAP + i, 0x00);
     for (let i = 0; i < 32; i++) view.setUint8(ADDR.ZONE_BITMAP + i, 0x00);
+    // Mark 80-channel zone format so the probe byte (0x806F) reads as 0x00
+    // (upper byte of channel index 23 in zone 0 — value ≤ 0x04 selects 80-ch format).
+    view.setUint8(ADDR.ZONE_FMT_PROBE, 0x00);
     const p = new CodeplugParser(buf);
     p.filename = 'new_codeplug.cdmr';
     return p;

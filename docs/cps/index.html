@@ -58,6 +58,14 @@
     </div>
   </div>
 
+  <!-- Zone format warning banner (hidden by default; shown when 16-ch format detected) -->
+  <div id="zone-fmt-banner" class="warn-banner" style="display:none">
+    <strong>Original zone format detected.</strong>
+    This codeplug uses 16-channel zones from the factory firmware.
+    Zones are displayed read-only in this mode.
+    To use 80-channel zones and full editing, write a new codeplug to the radio.
+  </div>
+
   <!-- Tab bar -->
   <div class="tab-bar">
     <button class="tab-btn active" data-tab="channels" type="button">
@@ -825,6 +833,13 @@
     ibFilename.className   = 'filename-chip';
     saveBtn.disabled       = false;
     writeBtn.disabled      = false;
+
+    // Warn when the codeplug uses the original 16-channel-per-zone format.
+    // This is normal for radios that were never programmed with ClearDMR CPS.
+    const fmtBanner = document.getElementById('zone-fmt-banner');
+    if (fmtBanner) {
+      fmtBanner.style.display = codeplug.zoneFormat === 'original' ? '' : 'none';
+    }
 
     refreshChannels();
     refreshZones();

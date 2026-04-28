@@ -20,6 +20,17 @@ main.cps-main {
   margin: 0;
 }
 
+/* ── Warning banner ───────────────────────────────────────────────────────── */
+
+.warn-banner {
+  background: #4a3200;
+  border-bottom: 1px solid #7a5500;
+  color: #ffd666;
+  padding: 8px 20px;
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+
 /* ── Info bar ─────────────────────────────────────────────────────────────── */
 
 .info-bar {

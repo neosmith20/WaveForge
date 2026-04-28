@@ -48,18 +48,25 @@ const CPWR_FLASH_HW_BASE = 0xA0000;
 // SerialAccumulator is defined in radio-read.js (loaded first); shared via global scope.
 
 // Send a write request and verify the 2-byte success response [0x58, subCmd].
-async function cpwrRequest(writer, acc, bytes) {
+async function cpwrRequest(writer, acc, bytes, context) {
   await writer.write(bytes);
   const r = await acc.readExact(1);
   if (r[0] !== CPWR_CMD_BYTE) {
-    throw new Error('Radio returned an error during write. Check that the radio is powered on normally and the port is not in use by another application.');
+    const where = context ? ` (${context})` : '';
+    throw new Error(
+      `Radio returned an error during write${where}. ` +
+      `Ensure the radio is powered on normally (not in DFU mode) and ` +
+      `the port is not in use by another application. ` +
+      `If the error persists, power-cycle the radio and try again.`
+    );
   }
   await acc.readExact(1);  // subcommand echo
 }
 
 // Write one 4 KB sector to SPI Flash via Prepare → Send data → Write.
 async function cpwrFlashSector(writer, acc, spiAddr, sectorData) {
-  const sector = Math.floor(spiAddr / CPWR_SECTOR_SIZE);
+  const sector  = Math.floor(spiAddr / CPWR_SECTOR_SIZE);
+  const addrHex = '0x' + spiAddr.toString(16).toUpperCase().padStart(5, '0');
 
   // 1. Prepare: radio reads the current sector into its internal buffer.
   await cpwrRequest(writer, acc, new Uint8Array([
@@ -67,7 +74,7 @@ async function cpwrFlashSector(writer, acc, spiAddr, sectorData) {
     (sector >>> 16) & 0xFF,
     (sector >>>  8) & 0xFF,
      sector         & 0xFF,
-  ]));
+  ]), `prepare sector ${addrHex}`);
 
   // 2. Send data in chunks, overlaying our bytes into the buffer.
   for (let i = 0; i < CPWR_SECTOR_SIZE; i += CPWR_CHUNK) {
@@ -82,32 +89,37 @@ async function cpwrFlashSector(writer, acc, spiAddr, sectorData) {
     req[6] = (len  >>>  8) & 0xFF;
     req[7] =  len          & 0xFF;
     req.set(sectorData.subarray(i, i + len), 8);
-    await cpwrRequest(writer, acc, req);
+    await cpwrRequest(writer, acc, req, `send data ${addrHex}+${i}`);
   }
 
   // 3. Write: erase the 4 KB sector then program from the buffer.
-  await cpwrRequest(writer, acc, new Uint8Array([CPWR_CMD_BYTE, CPWR_SUB_WRITE]));
+  await cpwrRequest(writer, acc, new Uint8Array([CPWR_CMD_BYTE, CPWR_SUB_WRITE]),
+    `erase/write sector ${addrHex}`);
 }
 
 // Drain any bytes left in the OS serial receive buffer from a previous session
 // (e.g., a read session whose port was closed without consuming all bytes).
-// Reads and discards bytes until no data arrives for DRAIN_MS milliseconds.
+// Returns once no data arrives for DRAIN_MS consecutive milliseconds.
 async function cpwrDrainBuffer(port) {
+  const DRAIN_MS = 200;
+
+  // Helper: read one chunk from the stream with a timeout.
+  // Returns the data chunk, or null if the timeout fires first.
+  async function readWithTimeout(reader, ms) {
+    return new Promise(resolve => {
+      const timer = setTimeout(() => resolve(null), ms);
+      reader.read().then(
+        ({ value, done }) => { clearTimeout(timer); resolve(done ? null : (value ?? null)); },
+        ()                => { clearTimeout(timer); resolve(null); }
+      );
+    });
+  }
+
   const reader = port.readable.getReader();
-  const DRAIN_MS = 150;
   try {
-    let hasMore = true;
-    while (hasMore) {
-      hasMore = await new Promise(resolve => {
-        const timer = setTimeout(() => resolve(false), DRAIN_MS);
-        reader.read().then(
-          ({ done }) => { clearTimeout(timer); resolve(!done); },
-          ()         => { clearTimeout(timer); resolve(false); }
-        );
-      });
-    }
+    // Keep draining until DRAIN_MS elapses with no data.
+    while (await readWithTimeout(reader, DRAIN_MS) !== null) { /* discard */ }
   } finally {
-    // releaseLock() cancels any in-flight reader.read(); suppress that rejection.
     try { reader.releaseLock(); } catch (_) {}
   }
 }
