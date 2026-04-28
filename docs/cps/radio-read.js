@@ -18,14 +18,14 @@
 //
 //   file[0x00000..0x07FFF]  → EEPROM lower half  (CPS_ACCESS_EEPROM, hw addr = file addr)
 //                             Channels, general settings, channel bitmap live here.
-//                             area=2 (EEPROM) correctly covers this 32 KB range.
+//                             Most radios expose this via area=2, but some boundary
+//                             chunks may need area=1 fallback.
 //
-//   file[0x08000..0x0FFFF]  → EEPROM upper half  (CPS_ACCESS_FLASH, hw addr = file addr)
+//   file[0x08000..0x0FFFF]  → EEPROM upper half  (hw addr = file addr)
 //                             Zone bitmap and zone list live here.
-//                             area=2 returns errors above 0x7FFF on radios where the
-//                             EEPROM area aliases only the lower 32 KB of SPI Flash.
-//                             Must be read via area=1 (SPI Flash) at the same hw addr —
-//                             the write command ('X') places this data at SPI Flash 0x8000+.
+//                             Access mode varies by radio, so we probe both area=2
+//                             and area=1 at the known zone offsets and use whichever
+//                             mode succeeds for this radio, with per-chunk fallback.
 //
 //   file[0x10000..0x1FFFF]  → SPI Flash region (CPS_ACCESS_FLASH, hw addr = file addr + 0x90000)
 //                             Contacts, RX groups live here.
@@ -41,14 +41,20 @@ const CPRD_FILE_SIZE      = 0x20000;    // 128 KB
 const CPRD_HALF           = CPRD_FILE_SIZE >>> 1;   // 64 KB per region
 const CPRD_QUARTER        = CPRD_HALF  >>> 1;       // 32 KB — EEPROM alias boundary
 const CPRD_MAX_RETRIES    = 2;          // retry transient chunk failures before giving up
+const CPRD_PROBE_LEN      = 32;
 
 // SPI Flash hw base address for the third (SPI Flash) region.
 // = file offset 0x10000 + FLASH_ADDRESS_OFFSET(0x20000) + 0x70000 = 0xA0000
 const CPRD_FLASH_HW_BASE  = 0xA0000;
 
+const CPRD_LOWER_BOUNDARY_OFFSET = 0x07C00;
 const CPRD_ZONE_BITMAP_OFFSET = 0x8010;
 const CPRD_ZONE_LIST_OFFSET   = 0x8030;
 const CPRD_ZONE_FMT_OFFSET    = 0x806F;
+const CPRD_REF_ZONE_BITMAP_PREFIX = new Uint8Array([0x3F, 0x00]);
+const CPRD_REF_ZONE0_NAME         = new Uint8Array([0x41, 0x6E, 0x61, 0x6C, 0x6F, 0x67]); // "Analog"
+const CPRD_REF_ZONE0_REFS_PREFIX  = new Uint8Array([0x01, 0x00, 0x35, 0x00, 0x02, 0x00, 0x03, 0x00]);
+const CPRD_REF_ZONE_PROBE         = 0x00;
 
 // Accumulate bytes from the Web Serial readable stream, preserving leftover bytes
 // across reads so USB packet boundaries never split a logical response.
@@ -103,14 +109,257 @@ function cprdHexSlice(fileBuf, offset, length) {
     b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
 }
 
-function cprdLogZoneDebug(fileBuf, chunkFailures) {
-  console.debug('[cpwrReadCodeplug] zone debug', {
+function cprdHexData(data, maxLen) {
+  if (!data) return null;
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  return Array.from(bytes.subarray(0, maxLen), b =>
+    b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+}
+
+function cprdAsciiData(data, maxLen) {
+  if (!data) return null;
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  return Array.from(bytes.subarray(0, maxLen), b =>
+    (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.').join('');
+}
+
+function cprdStartsWith(data, expected, offset = 0) {
+  if (!data || data.length < offset + expected.length) return false;
+  for (let i = 0; i < expected.length; i++) {
+    if (data[offset + i] !== expected[i]) return false;
+  }
+  return true;
+}
+
+function cprdIsPrintableZoneName(nameBytes) {
+  let seenPadding = false;
+  let seenText = false;
+  for (const b of nameBytes) {
+    if (b === 0xFF || b === 0x00) {
+      seenPadding = true;
+      continue;
+    }
+    if (seenPadding) return false;
+    if (b < 0x20 || b > 0x7E) return false;
+    seenText = true;
+  }
+  return seenText;
+}
+
+function cprdIsPlausibleZoneProbeByte(byte) {
+  return byte === 0xFF || byte <= 0x04 || (byte >= 0x20 && byte <= 0x7E);
+}
+
+function cprdAssessZoneProbe(offset, data) {
+  if (!data) return { score: 0, details: { ok: false } };
+
+  if (offset === CPRD_ZONE_BITMAP_OFFSET) {
+    const allFF = data.every(b => b === 0xFF);
+    const anySet = data.some(b => b !== 0x00 && b !== 0xFF);
+    return {
+      score: allFF ? 0 : (anySet ? 2 : 1),
+      details: {
+        ok: true,
+        allFF,
+        anySet,
+        live: cprdHexData(data, Math.min(data.length, 16)),
+      },
+    };
+  }
+
+  if (offset === CPRD_ZONE_LIST_OFFSET) {
+    const nameBytes = data.subarray(0, 16);
+    const namePlausible = cprdIsPrintableZoneName(nameBytes);
+    let saneRefs = 0;
+    let implausibleRefs = 0;
+    for (let i = 16; i + 1 < Math.min(data.length, 32); i += 2) {
+      const ref = data[i] | (data[i + 1] << 8);
+      if (ref === 0 || ref === 0xFFFF || (ref >= 1 && ref <= 1024)) saneRefs++;
+      else implausibleRefs++;
+    }
+    return {
+      score: (namePlausible ? 2 : 0) + Math.min(saneRefs, 2) - Math.min(implausibleRefs, 2),
+      details: {
+        ok: true,
+        namePlausible,
+        saneRefs,
+        implausibleRefs,
+        liveNameHex: cprdHexData(nameBytes, 16),
+        liveNameAscii: cprdAsciiData(nameBytes, 16),
+        liveRefs: cprdHexData(data.subarray(16, 24), 8),
+      },
+    };
+  }
+
+  if (offset === CPRD_ZONE_FMT_OFFSET) {
+    const probePlausible = data.length > 0 && cprdIsPlausibleZoneProbeByte(data[0]);
+    return {
+      score: probePlausible ? 1 : 0,
+      details: {
+        ok: true,
+        probePlausible,
+        live: cprdHexData(data, 1),
+      },
+    };
+  }
+
+  return { score: 0, details: { ok: true } };
+}
+
+function cprdCompareZoneProbeToReference(offset, data) {
+  if (!data) return { score: 0, details: { ok: false } };
+
+  if (offset === CPRD_ZONE_BITMAP_OFFSET) {
+    const bitmapPrefixMatches = cprdStartsWith(data, CPRD_REF_ZONE_BITMAP_PREFIX);
+    return {
+      score: bitmapPrefixMatches ? 2 : 0,
+      details: {
+        ok: true,
+        bitmapPrefixMatches,
+        live: cprdHexData(data, Math.min(data.length, 16)),
+        reference: cprdHexData(CPRD_REF_ZONE_BITMAP_PREFIX, CPRD_REF_ZONE_BITMAP_PREFIX.length),
+      },
+    };
+  }
+
+  if (offset === CPRD_ZONE_LIST_OFFSET) {
+    const nameMatches = cprdStartsWith(data, CPRD_REF_ZONE0_NAME);
+    const refsMatch   = cprdStartsWith(data, CPRD_REF_ZONE0_REFS_PREFIX, 16);
+    return {
+      score: (nameMatches ? 2 : 0) + (refsMatch ? 2 : 0),
+      details: {
+        ok: true,
+        nameMatches,
+        refsMatch,
+        liveNameHex: cprdHexData(data.subarray(0, 16), 16),
+        liveNameAscii: cprdAsciiData(data.subarray(0, 16), 16),
+        liveRefs: cprdHexData(data.subarray(16, 24), 8),
+        referenceNameAscii: 'Analog',
+        referenceRefs: cprdHexData(CPRD_REF_ZONE0_REFS_PREFIX, CPRD_REF_ZONE0_REFS_PREFIX.length),
+      },
+    };
+  }
+
+  if (offset === CPRD_ZONE_FMT_OFFSET) {
+    const probeMatches = data.length > 0 && data[0] === CPRD_REF_ZONE_PROBE;
+    return {
+      score: probeMatches ? 1 : 0,
+      details: {
+        ok: true,
+        probeMatches,
+        live: cprdHexData(data, 1),
+        reference: '00',
+      },
+    };
+  }
+
+  return { score: 0, details: { ok: true } };
+}
+
+async function cprdTryRead(writer, acc, areaType, hwAddr, length, context) {
+  for (let attempt = 0; attempt <= CPRD_MAX_RETRIES; attempt++) {
+    const data = await cprdRequest(writer, acc, areaType, hwAddr, length);
+    if (data) return data.subarray(0, length);
+    console.debug('[cpwrReadCodeplug] chunk read failed', {
+      context,
+      area: areaType,
+      attempt: attempt + 1,
+      hwAddr: '0x' + hwAddr.toString(16).toUpperCase().padStart(5, '0'),
+      length,
+    });
+  }
+  return null;
+}
+
+async function cprdProbeAccess(writer, acc, areaType, hwAddr, length, label) {
+  const data = await cprdTryRead(writer, acc, areaType, hwAddr, length, `probe ${label}`);
+  return { ok: !!data, data };
+}
+
+async function cprdChooseZoneArea(writer, acc) {
+  const probes = [
+    { offset: CPRD_ZONE_BITMAP_OFFSET, length: 32, label: 'bitmap_0x8010' },
+    { offset: CPRD_ZONE_LIST_OFFSET,   length: 32, label: 'zone0_0x8030'  },
+    { offset: CPRD_ZONE_FMT_OFFSET,    length: 1,  label: 'probe_0x806F'  },
+  ];
+  const results = {};
+
+  for (const areaType of [CPRD_AREA_EEPROM, CPRD_AREA_FLASH]) {
+    results[areaType] = [];
+    for (const probe of probes) {
+      const result = await cprdProbeAccess(writer, acc, areaType, probe.offset, probe.length, probe.label);
+      const heuristic = cprdAssessZoneProbe(probe.offset, result.data);
+      const compare = cprdCompareZoneProbeToReference(probe.offset, result.data);
+      results[areaType].push({
+        label: probe.label,
+        ok: result.ok,
+        data: cprdHexData(result.data, probe.length),
+        heuristic: heuristic.details,
+        compare: compare.details,
+        score: heuristic.score,
+      });
+    }
+  }
+
+  const eepromScore = results[CPRD_AREA_EEPROM].filter(r => r.ok).length;
+  const flashScore  = results[CPRD_AREA_FLASH].filter(r => r.ok).length;
+  const eepromHeuristicScore = results[CPRD_AREA_EEPROM].reduce((sum, r) => sum + r.score, 0);
+  const flashHeuristicScore  = results[CPRD_AREA_FLASH].reduce((sum, r) => sum + r.score, 0);
+  const preferredArea =
+    (flashHeuristicScore > eepromHeuristicScore) ? CPRD_AREA_FLASH :
+    (eepromHeuristicScore > flashHeuristicScore) ? CPRD_AREA_EEPROM :
+    (flashScore > eepromScore) ? CPRD_AREA_FLASH : CPRD_AREA_EEPROM;
+
+  console.debug('[cpwrReadCodeplug] zone access probe', {
+    preferredArea,
+    eepromHeuristicScore,
+    flashHeuristicScore,
+    eeprom: results[CPRD_AREA_EEPROM],
+    flash: results[CPRD_AREA_FLASH],
+  });
+
+  return preferredArea;
+}
+
+async function cprdProbeLowerBoundary(writer, acc) {
+  const result = {};
+  for (const areaType of [CPRD_AREA_EEPROM, CPRD_AREA_FLASH]) {
+    const probe = await cprdProbeAccess(
+      writer, acc, areaType, CPRD_LOWER_BOUNDARY_OFFSET, CPRD_PROBE_LEN, 'lower-boundary-0x07C00'
+    );
+    result[areaType] = {
+      ok: probe.ok,
+      data: cprdHexData(probe.data, CPRD_PROBE_LEN),
+    };
+  }
+  console.debug('[cpwrReadCodeplug] lower boundary probe', {
+    fileOffset: '0x07C00',
+    eeprom: result[CPRD_AREA_EEPROM],
+    flash: result[CPRD_AREA_FLASH],
+  });
+}
+
+function cprdLogReadDebug(fileBuf, chunkFailures) {
+  const zoneBitmap = fileBuf.subarray(CPRD_ZONE_BITMAP_OFFSET, CPRD_ZONE_BITMAP_OFFSET + 32);
+  const zone0      = fileBuf.subarray(CPRD_ZONE_LIST_OFFSET, CPRD_ZONE_LIST_OFFSET + 32);
+  const zoneProbe  = fileBuf.subarray(CPRD_ZONE_FMT_OFFSET, CPRD_ZONE_FMT_OFFSET + 1);
+  console.debug('[cpwrReadCodeplug] read debug', {
     bitmap_0x8010: cprdHexSlice(fileBuf, CPRD_ZONE_BITMAP_OFFSET, 32),
     zone0_0x8030:  cprdHexSlice(fileBuf, CPRD_ZONE_LIST_OFFSET, 32),
     probe_0x806F:  cprdHexSlice(fileBuf, CPRD_ZONE_FMT_OFFSET, 1),
+    heuristicCompare: {
+      bitmap_0x8010: cprdAssessZoneProbe(CPRD_ZONE_BITMAP_OFFSET, zoneBitmap).details,
+      zone0_0x8030:  cprdAssessZoneProbe(CPRD_ZONE_LIST_OFFSET, zone0).details,
+      probe_0x806F:  cprdAssessZoneProbe(CPRD_ZONE_FMT_OFFSET, zoneProbe).details,
+    },
+    referenceCompare: {
+      bitmap_0x8010: cprdCompareZoneProbeToReference(CPRD_ZONE_BITMAP_OFFSET, zoneBitmap).details,
+      zone0_0x8030:  cprdCompareZoneProbeToReference(CPRD_ZONE_LIST_OFFSET, zone0).details,
+      probe_0x806F:  cprdCompareZoneProbeToReference(CPRD_ZONE_FMT_OFFSET, zoneProbe).details,
+    },
     failedChunks:  chunkFailures.map(f => ({
       label:      f.label,
-      area:       f.areaType,
+      triedAreas: f.triedAreas,
       fileOffset: '0x' + f.fileOffset.toString(16).toUpperCase().padStart(5, '0'),
       hwAddr:     '0x' + f.hwAddr.toString(16).toUpperCase().padStart(5, '0'),
       length:     f.length,
@@ -138,33 +387,38 @@ async function cpwrReadCodeplug(onProgress) {
     writer = port.writable.getWriter();
     acc    = new SerialAccumulator(port.readable.getReader());
 
+    onProgress({ phase: 'read', pct: 0, msg: 'Probing radio read access…' });
+    await cprdProbeLowerBoundary(writer, acc);
+    const zonePreferredArea = await cprdChooseZoneArea(writer, acc);
+
     // Three logical regions; total chunks stays 128 (same time budget as before).
     const totalChunks = Math.ceil(CPRD_QUARTER / CPRD_CHUNK) * 2 +
                         Math.ceil(CPRD_HALF    / CPRD_CHUNK);
     let chunksDone = 0;
     const chunkFailures = [];
 
-    const readRegion = async (areaType, hwBase, fileBase, regionLen, label) => {
+    const readRegion = async (primaryArea, secondaryArea, hwBase, fileBase, regionLen, label) => {
       for (let i = 0; i < regionLen; i += CPRD_CHUNK) {
         const len  = Math.min(CPRD_CHUNK, regionLen - i);
         const hwAddr = hwBase + i;
-        let data = null;
-        for (let attempt = 0; attempt <= CPRD_MAX_RETRIES; attempt++) {
-          data = await cprdRequest(writer, acc, areaType, hwAddr, len);
-          if (data) break;
-          console.debug('[cpwrReadCodeplug] chunk read failed', {
+        const triedAreas = [];
+        let data = await cprdTryRead(writer, acc, primaryArea, hwAddr, len, `${label} primary`);
+        triedAreas.push(primaryArea);
+        if (!data && secondaryArea !== null && secondaryArea !== primaryArea) {
+          console.debug('[cpwrReadCodeplug] retrying chunk with alternate area', {
             label,
-            area: areaType,
-            attempt: attempt + 1,
-            hwAddr: '0x' + hwAddr.toString(16).toUpperCase().padStart(5, '0'),
             fileOffset: '0x' + (fileBase + i).toString(16).toUpperCase().padStart(5, '0'),
-            length: len,
+            hwAddr: '0x' + hwAddr.toString(16).toUpperCase().padStart(5, '0'),
+            primaryArea,
+            secondaryArea,
           });
+          data = await cprdTryRead(writer, acc, secondaryArea, hwAddr, len, `${label} fallback`);
+          triedAreas.push(secondaryArea);
         }
         if (data) {
           fileBuf.set(data.subarray(0, len), fileBase + i);
         } else {
-          chunkFailures.push({ label, areaType, fileOffset: fileBase + i, hwAddr, length: len });
+          chunkFailures.push({ label, triedAreas, fileOffset: fileBase + i, hwAddr, length: len });
         }
         chunksDone++;
         const pct = Math.round((chunksDone / totalChunks) * 100);
@@ -172,24 +426,30 @@ async function cpwrReadCodeplug(onProgress) {
       }
     };
 
-    // Lower EEPROM (channels, settings) — area=2 works here.
+    // Lower EEPROM (channels, settings) — prefer area=2, but boundary chunks may
+    // need area=1 on some radios.
     onProgress({ phase: 'read', pct: 0, msg: 'Reading EEPROM region…' });
-    await readRegion(CPRD_AREA_EEPROM, 0x00000, 0x00000, CPRD_QUARTER, 'EEPROM');
+    await readRegion(CPRD_AREA_EEPROM, CPRD_AREA_FLASH, 0x00000, 0x00000, CPRD_QUARTER, 'EEPROM');
 
-    // Upper EEPROM (zones) — area=2 errors above 0x7FFF; read via SPI Flash instead.
+    // Zone block — choose the preferred area from live probes, but retry each
+    // failed chunk via the other access mode.
     onProgress({ phase: 'read', pct: 25, msg: 'Reading zone region…' });
-    await readRegion(CPRD_AREA_FLASH, 0x08000, 0x08000, CPRD_QUARTER, 'zones');
+    await readRegion(
+      zonePreferredArea,
+      zonePreferredArea === CPRD_AREA_EEPROM ? CPRD_AREA_FLASH : CPRD_AREA_EEPROM,
+      0x08000, 0x08000, CPRD_QUARTER, 'zones'
+    );
 
     // SPI Flash region (contacts, RX groups).
     onProgress({ phase: 'read', pct: 50, msg: 'Reading SPI Flash region…' });
-    await readRegion(CPRD_AREA_FLASH, CPRD_FLASH_HW_BASE, CPRD_HALF, CPRD_HALF, 'SPI Flash');
+    await readRegion(CPRD_AREA_FLASH, null, CPRD_FLASH_HW_BASE, CPRD_HALF, CPRD_HALF, 'SPI Flash');
 
-    cprdLogZoneDebug(fileBuf, chunkFailures);
+    cprdLogReadDebug(fileBuf, chunkFailures);
 
     if (chunkFailures.length > 0) {
       const sample = chunkFailures.slice(0, 4).map(f =>
         `${f.label} file 0x${f.fileOffset.toString(16).toUpperCase().padStart(5, '0')} ` +
-        `(area=${f.areaType}, hw=0x${f.hwAddr.toString(16).toUpperCase().padStart(5, '0')})`
+        `(areas=${f.triedAreas.join('->')}, hw=0x${f.hwAddr.toString(16).toUpperCase().padStart(5, '0')})`
       ).join(', ');
       throw new Error(
         `Radio returned ${chunkFailures.length} failed codeplug read(s): ${sample}. ` +
