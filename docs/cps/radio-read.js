@@ -40,10 +40,15 @@ const CPRD_CHUNK          = 1024;       // bytes per request (firmware cap: 2045
 const CPRD_FILE_SIZE      = 0x20000;    // 128 KB
 const CPRD_HALF           = CPRD_FILE_SIZE >>> 1;   // 64 KB per region
 const CPRD_QUARTER        = CPRD_HALF  >>> 1;       // 32 KB — EEPROM alias boundary
+const CPRD_MAX_RETRIES    = 2;          // retry transient chunk failures before giving up
 
 // SPI Flash hw base address for the third (SPI Flash) region.
 // = file offset 0x10000 + FLASH_ADDRESS_OFFSET(0x20000) + 0x70000 = 0xA0000
 const CPRD_FLASH_HW_BASE  = 0xA0000;
+
+const CPRD_ZONE_BITMAP_OFFSET = 0x8010;
+const CPRD_ZONE_LIST_OFFSET   = 0x8030;
+const CPRD_ZONE_FMT_OFFSET    = 0x806F;
 
 // Accumulate bytes from the Web Serial readable stream, preserving leftover bytes
 // across reads so USB packet boundaries never split a logical response.
@@ -93,6 +98,26 @@ async function cprdRequest(writer, acc, areaType, hwAddr, length) {
   return acc.readExact(respLen);
 }
 
+function cprdHexSlice(fileBuf, offset, length) {
+  return Array.from(fileBuf.subarray(offset, offset + length), b =>
+    b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+}
+
+function cprdLogZoneDebug(fileBuf, chunkFailures) {
+  console.debug('[cpwrReadCodeplug] zone debug', {
+    bitmap_0x8010: cprdHexSlice(fileBuf, CPRD_ZONE_BITMAP_OFFSET, 32),
+    zone0_0x8030:  cprdHexSlice(fileBuf, CPRD_ZONE_LIST_OFFSET, 32),
+    probe_0x806F:  cprdHexSlice(fileBuf, CPRD_ZONE_FMT_OFFSET, 1),
+    failedChunks:  chunkFailures.map(f => ({
+      label:      f.label,
+      area:       f.areaType,
+      fileOffset: '0x' + f.fileOffset.toString(16).toUpperCase().padStart(5, '0'),
+      hwAddr:     '0x' + f.hwAddr.toString(16).toUpperCase().padStart(5, '0'),
+      length:     f.length,
+    })),
+  });
+}
+
 // Read the radio's full codeplug via USB CDC and return it as an ArrayBuffer.
 // onProgress({ phase: 'read', pct: 0-100, msg: string })
 async function cpwrReadCodeplug(onProgress) {
@@ -117,16 +142,29 @@ async function cpwrReadCodeplug(onProgress) {
     const totalChunks = Math.ceil(CPRD_QUARTER / CPRD_CHUNK) * 2 +
                         Math.ceil(CPRD_HALF    / CPRD_CHUNK);
     let chunksDone = 0;
-    let chunksFailed = 0;
+    const chunkFailures = [];
 
     const readRegion = async (areaType, hwBase, fileBase, regionLen, label) => {
       for (let i = 0; i < regionLen; i += CPRD_CHUNK) {
         const len  = Math.min(CPRD_CHUNK, regionLen - i);
-        const data = await cprdRequest(writer, acc, areaType, hwBase + i, len);
+        const hwAddr = hwBase + i;
+        let data = null;
+        for (let attempt = 0; attempt <= CPRD_MAX_RETRIES; attempt++) {
+          data = await cprdRequest(writer, acc, areaType, hwAddr, len);
+          if (data) break;
+          console.debug('[cpwrReadCodeplug] chunk read failed', {
+            label,
+            area: areaType,
+            attempt: attempt + 1,
+            hwAddr: '0x' + hwAddr.toString(16).toUpperCase().padStart(5, '0'),
+            fileOffset: '0x' + (fileBase + i).toString(16).toUpperCase().padStart(5, '0'),
+            length: len,
+          });
+        }
         if (data) {
           fileBuf.set(data.subarray(0, len), fileBase + i);
         } else {
-          chunksFailed++;
+          chunkFailures.push({ label, areaType, fileOffset: fileBase + i, hwAddr, length: len });
         }
         chunksDone++;
         const pct = Math.round((chunksDone / totalChunks) * 100);
@@ -146,13 +184,16 @@ async function cpwrReadCodeplug(onProgress) {
     onProgress({ phase: 'read', pct: 50, msg: 'Reading SPI Flash region…' });
     await readRegion(CPRD_AREA_FLASH, CPRD_FLASH_HW_BASE, CPRD_HALF, CPRD_HALF, 'SPI Flash');
 
-    // If the vast majority of reads returned device errors, something is wrong
-    // with the connection rather than the radio just having blank areas.
-    if (chunksFailed > totalChunks * 0.9) {
+    cprdLogZoneDebug(fileBuf, chunkFailures);
+
+    if (chunkFailures.length > 0) {
+      const sample = chunkFailures.slice(0, 4).map(f =>
+        `${f.label} file 0x${f.fileOffset.toString(16).toUpperCase().padStart(5, '0')} ` +
+        `(area=${f.areaType}, hw=0x${f.hwAddr.toString(16).toUpperCase().padStart(5, '0')})`
+      ).join(', ');
       throw new Error(
-        `Radio returned errors on ${chunksFailed}/${totalChunks} reads. ` +
-        `Ensure the radio is powered on normally (not in DFU mode) and ` +
-        `this browser has permission to access it.`
+        `Radio returned ${chunkFailures.length} failed codeplug read(s): ${sample}. ` +
+        `Aborting instead of leaving 0xFF-filled gaps in the codeplug image.`
       );
     }
 
