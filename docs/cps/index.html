@@ -53,6 +53,7 @@
       <button class="btn-sm btn-sm-outline" id="new-btn" type="button">New Codeplug</button>
       <button class="btn-sm btn-sm-outline" id="open-btn" type="button">Open .g77 / .cdmr</button>
       <button class="btn-sm btn-sm-primary" id="save-btn" type="button" disabled>Save .cdmr</button>
+      <button class="btn-sm btn-sm-write" id="write-btn" type="button" disabled>Write to Radio</button>
     </div>
   </div>
 
@@ -461,6 +462,45 @@
     </div>
   </dialog>
 
+  <!-- Write to Radio modal -->
+  <dialog id="write-modal" class="write-modal">
+    <div class="modal-header">
+      <h3>Write to Radio</h3>
+      <button class="modal-close" id="write-modal-close" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="section-desc">
+        Writes your codeplug to the radio&rsquo;s staging area via WebUSB.
+        After writing, unplug the USB cable and power on the radio normally &mdash;
+        ClearDMR will import the codeplug on the next boot.
+      </p>
+      <div class="write-dfu-steps">
+        <ol>
+          <li>Hold <strong>PTT + SK1</strong> simultaneously.</li>
+          <li>While holding both, turn the radio on.</li>
+          <li>The LED will flash <strong>red/green</strong> to confirm DFU mode.</li>
+          <li>Click <strong>Connect &amp; Write</strong> below and select your radio.</li>
+        </ol>
+      </div>
+      <div class="write-note">
+        WebUSB requires Chrome, Edge, or another Chromium-based browser.
+        Firefox and Safari are not supported.
+      </div>
+      <div class="write-progress-wrap" id="write-progress-wrap">
+        <div class="write-progress-bar">
+          <div class="write-progress-fill" id="write-progress-fill"></div>
+        </div>
+        <div class="write-progress-label" id="write-progress-label">0%</div>
+      </div>
+      <p class="write-status" id="write-status"></p>
+    </div>
+    <div class="write-footer">
+      <div class="modal-spacer"></div>
+      <button class="btn-sm btn-sm-outline" id="write-cancel-btn" type="button">Close</button>
+      <button class="btn-sm btn-sm-write" id="write-connect-btn" type="button">Connect &amp; Write</button>
+    </div>
+  </dialog>
+
   <!-- New Codeplug Wizard -->
   <dialog id="wizard-modal" class="wizard-modal">
     <div class="modal-header">
@@ -535,6 +575,7 @@
     </div>
   </dialog>
 
+  <script src="radio-write.js"></script>
   <script src="cps.js"></script>
   <script>
   'use strict';
@@ -687,6 +728,7 @@
     ibFilename.textContent = codeplug.filename || 'unknown';
     ibFilename.className   = 'filename-chip';
     saveBtn.disabled       = false;
+    writeBtn.disabled      = false;
 
     refreshChannels();
     refreshZones();
@@ -1587,6 +1629,71 @@
     closeWizard();
     renderAll();
   }
+
+  // ── Write to Radio ────────────────────────────────────────────────────────────
+
+  const writeBtn        = document.getElementById('write-btn');
+  const writeModal      = document.getElementById('write-modal');
+  const writeModalClose = document.getElementById('write-modal-close');
+  const writeCancelBtn  = document.getElementById('write-cancel-btn');
+  const writeConnectBtn = document.getElementById('write-connect-btn');
+  const writeStatusEl   = document.getElementById('write-status');
+  const writeProgressWrap = document.getElementById('write-progress-wrap');
+  const writeProgressFill = document.getElementById('write-progress-fill');
+  const writeProgressLabel = document.getElementById('write-progress-label');
+
+  function openWriteModal() {
+    writeStatusEl.textContent  = '';
+    writeStatusEl.className    = 'write-status';
+    writeProgressWrap.classList.remove('visible');
+    writeProgressFill.style.width  = '0%';
+    writeProgressLabel.textContent = '0%';
+    writeConnectBtn.disabled = false;
+    writeModal.showModal();
+  }
+
+  function closeWriteModal() { writeModal.close(); }
+
+  function setWriteStatus(msg, cls) {
+    writeStatusEl.textContent = msg;
+    writeStatusEl.className   = 'write-status' + (cls ? ' ' + cls : '');
+  }
+
+  writeBtn.addEventListener('click',        openWriteModal);
+  writeModalClose.addEventListener('click', closeWriteModal);
+  writeCancelBtn.addEventListener('click',  closeWriteModal);
+  writeModal.addEventListener('click', e => { if (e.target === writeModal) closeWriteModal(); });
+
+  writeConnectBtn.addEventListener('click', async () => {
+    if (!codeplug) return;
+    writeConnectBtn.disabled = true;
+    writeProgressWrap.classList.add('visible');
+    writeProgressFill.style.width  = '0%';
+    writeProgressLabel.textContent = '0%';
+    setWriteStatus('Connecting…', 'muted');
+
+    try {
+      await cpwrWriteCodeplug(codeplug.toArrayBuffer(), ({ phase, pct, msg }) => {
+        // Erase = 0–10 %, write = 10–100 %
+        const overall = phase === 'erase'
+          ? Math.round(pct * 0.1)
+          : 10 + Math.round(pct * 0.9);
+        writeProgressFill.style.width  = `${overall}%`;
+        writeProgressLabel.textContent = `${overall}%`;
+        setWriteStatus(msg || '', 'muted');
+      });
+      writeProgressFill.style.width  = '100%';
+      writeProgressLabel.textContent = '100%';
+      setWriteStatus('Done! Unplug the USB cable and power on normally to apply the codeplug.', 'ok');
+    } catch (err) {
+      if (err.name === 'NotFoundError') {
+        setWriteStatus('No device selected.', 'muted');
+      } else {
+        setWriteStatus(`Write failed: ${err.message}`, 'err');
+      }
+      writeConnectBtn.disabled = false;
+    }
+  });
 
   </script>
 </body>
