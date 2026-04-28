@@ -149,16 +149,28 @@ class CodeplugParser {
     this._contacts = null;
     this._rxGroups = null;
 
-    // Detect zone format using the same probe byte the firmware uses in
-    // codeplugInitChannelsPerZone(): EEPROM 0x806F.
+    // Detect zone format using the probe byte at EEPROM 0x806F (same address
+    // the firmware checks in codeplugInitChannelsPerZone()).
     //
-    // 16-ch format (original): 0x806F is the last byte of zone 1's name —
-    //   it is 0xFF (padding) or a printable ASCII char (≥ 0x20), never ≤ 0x04.
-    // 80-ch format (OpenGD77 extended): 0x806F is the upper byte of channel
-    //   index 23 in zone 0's list — max channel index is 1024 (0x400) so the
-    //   upper byte is always 0x00–0x04.
+    // In 80-ch (OpenGD77 extended) format, 0x806F is the HIGH byte of zone 0's
+    // channel[23].  Max channel index is 1024 (0x400), so this byte is 0x00–0x04
+    // when that slot holds a real channel.  When the slot is unused it may be:
+    //   • 0x00  — written by this CPS (writeZone pads unused slots with 0x0000)
+    //   • 0xFF  — written by the original OpenGD77 CPS (leaves unused slots as
+    //             0xFFFF, the erased-flash default)
+    //
+    // In 16-ch (original Tytera) format, 0x806F is the LAST byte of zone 1's
+    // name.  If the name is shorter than 16 chars this byte is 0xFF (padding);
+    // if the name is exactly 16 chars it is a printable ASCII character (0x20–0x7E).
+    //
+    // Distinguishing rule:
+    //   probeByte ∈ [0x05, 0xFE]  → must be a zone-name ASCII character → 16-ch
+    //   probeByte ∈ [0x00, 0x04]  → channel-index upper byte            → 80-ch
+    //   probeByte = 0xFF           → ambiguous; could be an unused 80-ch slot
+    //                                (OpenGD77 CPS leaves 0xFFFF) or a short
+    //                                16-ch zone-1 name → default to 80-ch
     const probeByte = this.view.getUint8(ADDR.ZONE_FMT_PROBE);
-    this._channelsPerZone = (probeByte <= 0x04) ? 80 : 16;
+    this._channelsPerZone = (probeByte >= 0x05 && probeByte <= 0xFE) ? 16 : 80;
     this._zoneStructSize  = 16 + this._channelsPerZone * 2;  // 48 or 176
   }
 
