@@ -28,9 +28,9 @@ const CPRD_AREA_EEPROM = 2;
 const CPRD_FILE_SIZE         = 0x20000;
 const CPRD_FLASH_FILE_BASE   = 0x10000;
 const CPRD_FLASH_HW_BASE     = 0xA0000;
-const CPRD_INTER_REQUEST_MS  = 20;
-const CPRD_ERROR_BACKOFF_MS  = 150;
-const CPRD_MAX_RETRIES       = 1; // one extra attempt at most
+const CPRD_INTER_REQUEST_MS  = 50;  // minimum gap before every USB read, success or failure
+const CPRD_ERROR_BACKOFF_MS  = 150; // additional wait before each retry on a failed chunk
+const CPRD_MAX_RETRIES       = 1;   // hard cap: 1 original + 1 retry = 2 total attempts per chunk
 const CPRD_ZONE_PROBE_LEN    = 32;
 
 const CPRD_DEVICE_INFO_OFFSET      = 0x0080;
