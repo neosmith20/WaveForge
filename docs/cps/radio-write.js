@@ -45,33 +45,7 @@ const CPWR_HALF        = CPWR_FILE_SIZE >>> 1;   // 64 KB per region
 //   file 0x10000 + FLASH_ADDRESS_OFFSET(0x20000) + 0x70000 = 0xA0000
 const CPWR_FLASH_HW_BASE = 0xA0000;
 
-// Accumulate bytes from the Web Serial readable stream, preserving leftovers
-// across reads so USB packet boundaries never split a logical response.
-class SerialAccumulator {
-  constructor(reader) {
-    this._reader  = reader;
-    this._pending = new Uint8Array(0);
-  }
-
-  async readExact(n) {
-    while (this._pending.length < n) {
-      const { value, done } = await this._reader.read();
-      if (done) throw new Error('Serial port closed unexpectedly.');
-      const chunk = value instanceof Uint8Array
-        ? value
-        : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-      const merged = new Uint8Array(this._pending.length + chunk.length);
-      merged.set(this._pending, 0);
-      merged.set(chunk, this._pending.length);
-      this._pending = merged;
-    }
-    const out     = this._pending.slice(0, n);
-    this._pending = this._pending.slice(n);
-    return out;
-  }
-
-  releaseLock() { this._reader.releaseLock(); }
-}
+// SerialAccumulator is defined in radio-read.js (loaded first); shared via global scope.
 
 // Send a write request and verify the 2-byte success response [0x58, subCmd].
 async function cpwrRequest(writer, acc, bytes) {
