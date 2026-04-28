@@ -55,6 +55,7 @@
       <button class="btn-sm btn-sm-read" id="read-btn" type="button">Read from Radio</button>
       <button class="btn-sm btn-sm-primary" id="save-btn" type="button" disabled>Save .cdmr</button>
       <button class="btn-sm btn-sm-write" id="write-btn" type="button" disabled>Write to Radio</button>
+      <button class="btn-sm btn-sm-outline" id="dump-btn" type="button" style="display:none">&#x2699; Raw Dump</button>
     </div>
   </div>
 
@@ -563,6 +564,32 @@
     </div>
   </dialog>
 
+  <!-- Debug: raw memory dump (visible at index.html#debug) -->
+  <dialog id="dump-modal" class="write-modal">
+    <div class="modal-header">
+      <h3>Raw Codeplug Dump</h3>
+      <button class="modal-close" id="dump-modal-close" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="section-desc" style="color:#c00;font-family:monospace;font-size:0.85em">
+        DEBUG — reads 128 KB raw (EEPROM 0x00000&ndash;0x0FFFF + Flash 0x80000&ndash;0x8FFFF)
+        and downloads as .bin. No parsing. ~26 s. Do not disconnect during dump.
+      </p>
+      <div class="write-progress-wrap" id="dump-progress-wrap">
+        <div class="write-progress-bar">
+          <div class="write-progress-fill" id="dump-progress-fill"></div>
+        </div>
+        <div class="write-progress-label" id="dump-progress-label">0%</div>
+      </div>
+      <p class="write-status" id="dump-status"></p>
+    </div>
+    <div class="write-footer">
+      <div class="modal-spacer"></div>
+      <button class="btn-sm btn-sm-outline" id="dump-cancel-btn" type="button">Close</button>
+      <button class="btn-sm btn-sm-read"    id="dump-connect-btn" type="button">Connect &amp; Dump</button>
+    </div>
+  </dialog>
+
   <!-- Write to Radio modal -->
   <dialog id="write-modal" class="write-modal">
     <div class="modal-header">
@@ -679,6 +706,7 @@
 
   <script src="radio-read.js"></script>
   <script src="radio-write.js"></script>
+  <script src="radio-dump.js"></script>
   <script src="cps.js"></script>
   <script>
   'use strict';
@@ -1977,6 +2005,82 @@
         setReadStatus(`Read failed: ${err.message}`, 'err');
       }
       readConnectBtn.disabled = false;
+    }
+  });
+
+  // ── Debug: Raw Dump (index.html#debug) ────────────────────────────────────
+
+  const dumpBtn          = document.getElementById('dump-btn');
+  const dumpModal        = document.getElementById('dump-modal');
+  const dumpModalClose   = document.getElementById('dump-modal-close');
+  const dumpCancelBtn    = document.getElementById('dump-cancel-btn');
+  const dumpConnectBtn   = document.getElementById('dump-connect-btn');
+  const dumpStatusEl     = document.getElementById('dump-status');
+  const dumpProgressWrap = document.getElementById('dump-progress-wrap');
+  const dumpProgressFill = document.getElementById('dump-progress-fill');
+  const dumpProgressLbl  = document.getElementById('dump-progress-label');
+
+  function applyDumpVisibility() {
+    dumpBtn.style.display = (window.location.hash === '#debug') ? '' : 'none';
+  }
+  applyDumpVisibility();
+  window.addEventListener('hashchange', applyDumpVisibility);
+
+  dumpBtn.addEventListener('click', () => {
+    dumpStatusEl.textContent  = '';
+    dumpStatusEl.className    = 'write-status';
+    dumpProgressWrap.classList.remove('visible');
+    dumpProgressFill.style.width = '0%';
+    dumpProgressLbl.textContent  = '0%';
+    dumpConnectBtn.disabled = false;
+    dumpModal.showModal();
+  });
+
+  dumpModalClose.addEventListener('click', () => dumpModal.close());
+  dumpCancelBtn.addEventListener('click',  () => dumpModal.close());
+  dumpModal.addEventListener('click', e => { if (e.target === dumpModal) dumpModal.close(); });
+
+  dumpConnectBtn.addEventListener('click', async () => {
+    dumpConnectBtn.disabled = true;
+    dumpProgressWrap.classList.add('visible');
+    dumpProgressFill.style.width = '0%';
+    dumpProgressLbl.textContent  = '0%';
+    dumpStatusEl.textContent = 'Connecting…';
+    dumpStatusEl.className   = 'write-status muted';
+
+    try {
+      const { buffer, failedChunks } = await cpwrDumpCodeplug(({ pct, msg }) => {
+        dumpProgressFill.style.width = `${pct}%`;
+        dumpProgressLbl.textContent  = `${pct}%`;
+        dumpStatusEl.textContent = msg || '';
+        dumpStatusEl.className   = 'write-status muted';
+      });
+
+      const ts    = new Date().toISOString().replace(/[:\-]/g, '').replace('T', '_').slice(0, 15);
+      const fname = `codeplug_dump_${ts}.bin`;
+      const blob  = new Blob([buffer], { type: 'application/octet-stream' });
+      const url   = URL.createObjectURL(blob);
+      const a     = Object.assign(document.createElement('a'), { href: url, download: fname });
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      dumpProgressFill.style.width = '100%';
+      dumpProgressLbl.textContent  = '100%';
+      const failNote = failedChunks.length
+        ? ` (${failedChunks.length} chunk(s) failed: ${failedChunks.slice(0, 3).join(', ')}${failedChunks.length > 3 ? '…' : ''})`
+        : '';
+      dumpStatusEl.textContent = `Saved ${fname}${failNote}`;
+      dumpStatusEl.className   = failedChunks.length ? 'write-status warn' : 'write-status ok';
+      dumpConnectBtn.disabled  = false;
+
+    } catch (err) {
+      dumpStatusEl.textContent = err.name === 'NotFoundError'
+        ? 'No device selected.'
+        : `Dump failed: ${err.message}`;
+      dumpStatusEl.className  = err.name === 'NotFoundError' ? 'write-status muted' : 'write-status err';
+      dumpConnectBtn.disabled = false;
     }
   });
 
