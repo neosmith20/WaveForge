@@ -52,6 +52,7 @@
       <input type="file" id="file-input" accept=".g77,.cdmr" hidden>
       <button class="btn-sm btn-sm-outline" id="new-btn" type="button">New Codeplug</button>
       <button class="btn-sm btn-sm-outline" id="open-btn" type="button">Open .g77 / .cdmr</button>
+      <button class="btn-sm btn-sm-read" id="read-btn" type="button">Read from Radio</button>
       <button class="btn-sm btn-sm-primary" id="save-btn" type="button" disabled>Save .cdmr</button>
       <button class="btn-sm btn-sm-write" id="write-btn" type="button" disabled>Write to Radio</button>
     </div>
@@ -69,6 +70,7 @@
       Contacts <span class="tab-count" id="count-contacts">0</span>
     </button>
     <button class="tab-btn" data-tab="bootscreen" type="button">Boot Screen</button>
+    <button class="tab-btn" data-tab="bandlimits" type="button">Band Limits</button>
     <button class="tab-btn" data-tab="bootmelody" type="button">Boot Melody</button>
   </div>
 
@@ -82,8 +84,11 @@
           <div class="drop-zone-icon">&#128223;</div>
           <h2>Open a Codeplug</h2>
           <p>Drag and drop a <strong>.g77</strong> or <strong>.cdmr</strong> file here,
-             or click <strong>Open</strong> above.</p>
-          <button class="btn-sm btn-sm-outline" id="drop-open-btn" type="button">Choose file&hellip;</button>
+             or use one of the options below.</p>
+          <div class="drop-zone-btns">
+            <button class="btn-sm btn-sm-outline" id="drop-open-btn" type="button">Choose file&hellip;</button>
+            <button class="btn-sm btn-sm-read" id="drop-read-btn" type="button">Read from Radio&hellip;</button>
+          </div>
           <p class="file-types">Supported: .g77 (OpenGD77) &bull; .cdmr (ClearDMR)</p>
         </div>
         <div class="empty-divider"><span>or</span></div>
@@ -226,6 +231,57 @@
         </div>
 
       </div><!-- /#panel-bootscreen -->
+
+      <!-- Band Limits panel -->
+      <div id="panel-bandlimits" class="tab-panel boot-panel">
+
+        <div class="section-card">
+          <div class="section-card-header"><h3>VHF Band</h3></div>
+          <div class="section-card-body">
+            <p class="section-desc">
+              Restrict the radio to a VHF sub-range within the hardware capability
+              (127&ndash;178&nbsp;MHz). The firmware ignores these values unless both
+              VHF and UHF limits pass validation on boot.
+            </p>
+            <div class="field-group">
+              <div class="field-row">
+                <span class="field-label">Min Frequency (MHz)</span>
+                <input type="number" id="bl-vhf-min" class="field-input" min="127" max="178" step="1" placeholder="144">
+              </div>
+              <div class="field-row">
+                <span class="field-label">Max Frequency (MHz)</span>
+                <input type="number" id="bl-vhf-max" class="field-input" min="127" max="178" step="1" placeholder="148">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-card-header"><h3>UHF Band</h3></div>
+          <div class="section-card-body">
+            <p class="section-desc">
+              Restrict the radio to a UHF sub-range within the hardware capability
+              (380&ndash;564&nbsp;MHz).
+            </p>
+            <div class="field-group">
+              <div class="field-row">
+                <span class="field-label">Min Frequency (MHz)</span>
+                <input type="number" id="bl-uhf-min" class="field-input" min="380" max="564" step="1" placeholder="400">
+              </div>
+              <div class="field-row">
+                <span class="field-label">Max Frequency (MHz)</span>
+                <input type="number" id="bl-uhf-max" class="field-input" min="380" max="564" step="1" placeholder="480">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p class="melody-status" id="bl-status"></p>
+        <div class="section-actions">
+          <button class="btn-sm btn-sm-primary" id="bl-save" type="button" disabled>Save to Codeplug</button>
+        </div>
+
+      </div><!-- /#panel-bandlimits -->
 
       <!-- Boot Melody panel -->
       <div id="panel-bootmelody" class="tab-panel melody-panel">
@@ -462,6 +518,43 @@
     </div>
   </dialog>
 
+  <!-- Read from Radio modal -->
+  <dialog id="read-modal" class="write-modal">
+    <div class="modal-header">
+      <h3>Read from Radio</h3>
+      <button class="modal-close" id="read-modal-close" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="section-desc">
+        Reads the codeplug from the connected radio into the CPS editor via USB.
+        The radio must be <strong>powered on normally</strong> &mdash; do <strong>not</strong> enter DFU mode.
+      </p>
+      <div class="write-dfu-steps">
+        <ol>
+          <li>Power on the radio normally (do <strong>not</strong> hold PTT&nbsp;+&nbsp;SK1).</li>
+          <li>Connect the USB cable to your computer.</li>
+          <li>Click <strong>Connect &amp; Read</strong> and select your radio from the list.</li>
+        </ol>
+      </div>
+      <div class="write-note">
+        Web Serial requires Chrome, Edge, or another Chromium-based browser.
+        Firefox and Safari are not supported.
+      </div>
+      <div class="write-progress-wrap" id="read-progress-wrap">
+        <div class="write-progress-bar">
+          <div class="write-progress-fill" id="read-progress-fill"></div>
+        </div>
+        <div class="write-progress-label" id="read-progress-label">0%</div>
+      </div>
+      <p class="write-status" id="read-status"></p>
+    </div>
+    <div class="write-footer">
+      <div class="modal-spacer"></div>
+      <button class="btn-sm btn-sm-outline" id="read-cancel-btn" type="button">Close</button>
+      <button class="btn-sm btn-sm-read" id="read-connect-btn" type="button">Connect &amp; Read</button>
+    </div>
+  </dialog>
+
   <!-- Write to Radio modal -->
   <dialog id="write-modal" class="write-modal">
     <div class="modal-header">
@@ -575,6 +668,7 @@
     </div>
   </dialog>
 
+  <script src="radio-read.js"></script>
   <script src="radio-write.js"></script>
   <script src="cps.js"></script>
   <script>
@@ -604,6 +698,7 @@
     zones:      document.getElementById('panel-zones'),
     contacts:   document.getElementById('panel-contacts'),
     bootscreen: document.getElementById('panel-bootscreen'),
+    bandlimits: document.getElementById('panel-bandlimits'),
     bootmelody: document.getElementById('panel-bootmelody'),
   };
   const countEls = {
@@ -734,6 +829,7 @@
     refreshZones();
     refreshContacts();
     loadBootSections();
+    loadBandLimits();
     emptyState.classList.add('hidden');
     tableArea.classList.remove('hidden');
   }
@@ -1695,6 +1791,151 @@
         setWriteStatus(`Write failed: ${err.message}`, 'err');
       }
       writeConnectBtn.disabled = false;
+    }
+  });
+
+  // ── Band Limits ────────────────────────────────────────────────────────────
+
+  const BL_VHF_HW_MIN = 127, BL_VHF_HW_MAX = 178;
+  const BL_UHF_HW_MIN = 380, BL_UHF_HW_MAX = 564;
+
+  const blVhfMin  = document.getElementById('bl-vhf-min');
+  const blVhfMax  = document.getElementById('bl-vhf-max');
+  const blUhfMin  = document.getElementById('bl-uhf-min');
+  const blUhfMax  = document.getElementById('bl-uhf-max');
+  const blStatus  = document.getElementById('bl-status');
+  const blSave    = document.getElementById('bl-save');
+
+  function loadBandLimits() {
+    if (!codeplug) return;
+    const bl = codeplug.bandLimits;
+    // Show blank when values are 0 (uninitialised) or 0xFF patterns from blank flash
+    const show = v => (v > 0 && v < 0xFFFF) ? v : '';
+    blVhfMin.value = show(bl.minVHF);
+    blVhfMax.value = show(bl.maxVHF);
+    blUhfMin.value = show(bl.minUHF);
+    blUhfMax.value = show(bl.maxUHF);
+    validateBandLimits();
+  }
+
+  function validateBandLimits() {
+    const vMin = parseInt(blVhfMin.value, 10);
+    const vMax = parseInt(blVhfMax.value, 10);
+    const uMin = parseInt(blUhfMin.value, 10);
+    const uMax = parseInt(blUhfMax.value, 10);
+    const allFilled = [vMin, vMax, uMin, uMax].every(Number.isFinite);
+
+    if (!allFilled) {
+      blStatus.textContent = ''; blStatus.className = 'melody-status';
+      blSave.disabled = true;
+      return;
+    }
+    const errs = [];
+    if (vMin < BL_VHF_HW_MIN || vMin > BL_VHF_HW_MAX)
+      errs.push(`VHF min must be ${BL_VHF_HW_MIN}–${BL_VHF_HW_MAX} MHz`);
+    if (vMax < BL_VHF_HW_MIN || vMax > BL_VHF_HW_MAX)
+      errs.push(`VHF max must be ${BL_VHF_HW_MIN}–${BL_VHF_HW_MAX} MHz`);
+    if (vMax <= vMin)
+      errs.push('VHF max must be greater than VHF min');
+    if (uMin < BL_UHF_HW_MIN || uMin > BL_UHF_HW_MAX)
+      errs.push(`UHF min must be ${BL_UHF_HW_MIN}–${BL_UHF_HW_MAX} MHz`);
+    if (uMax < BL_UHF_HW_MIN || uMax > BL_UHF_HW_MAX)
+      errs.push(`UHF max must be ${BL_UHF_HW_MIN}–${BL_UHF_HW_MAX} MHz`);
+    if (uMax <= uMin)
+      errs.push('UHF max must be greater than UHF min');
+    if (!errs.length && uMin <= vMax)
+      errs.push('UHF min must be greater than VHF max');
+
+    if (errs.length) {
+      blStatus.textContent = errs[0]; blStatus.className = 'melody-status err';
+      blSave.disabled = true;
+    } else {
+      blStatus.textContent = 'Values look valid'; blStatus.className = 'melody-status ok';
+      blSave.disabled = !codeplug;
+    }
+  }
+
+  [blVhfMin, blVhfMax, blUhfMin, blUhfMax].forEach(el =>
+    el.addEventListener('input', validateBandLimits)
+  );
+
+  blSave.addEventListener('click', () => {
+    if (!codeplug) return;
+    codeplug.writeBandLimits({
+      minVHF: parseInt(blVhfMin.value, 10),
+      maxVHF: parseInt(blVhfMax.value, 10),
+      minUHF: parseInt(blUhfMin.value, 10),
+      maxUHF: parseInt(blUhfMax.value, 10),
+    });
+    const orig = blSave.textContent;
+    blSave.textContent = 'Saved!';
+    setTimeout(() => { blSave.textContent = orig; }, 1500);
+  });
+
+  // ── Read from Radio ────────────────────────────────────────────────────────
+
+  const readBtn          = document.getElementById('read-btn');
+  const dropReadBtn      = document.getElementById('drop-read-btn');
+  const readModal        = document.getElementById('read-modal');
+  const readModalClose   = document.getElementById('read-modal-close');
+  const readCancelBtn    = document.getElementById('read-cancel-btn');
+  const readConnectBtn   = document.getElementById('read-connect-btn');
+  const readStatusEl     = document.getElementById('read-status');
+  const readProgressWrap = document.getElementById('read-progress-wrap');
+  const readProgressFill = document.getElementById('read-progress-fill');
+  const readProgressLbl  = document.getElementById('read-progress-label');
+
+  function openReadModal() {
+    readStatusEl.textContent  = '';
+    readStatusEl.className    = 'write-status';
+    readProgressWrap.classList.remove('visible');
+    readProgressFill.style.width  = '0%';
+    readProgressLbl.textContent   = '0%';
+    readConnectBtn.disabled = false;
+    readModal.showModal();
+  }
+
+  function closeReadModal() { readModal.close(); }
+
+  function setReadStatus(msg, cls) {
+    readStatusEl.textContent = msg;
+    readStatusEl.className   = 'write-status' + (cls ? ' ' + cls : '');
+  }
+
+  readBtn.addEventListener('click',        openReadModal);
+  dropReadBtn.addEventListener('click',    openReadModal);
+  readModalClose.addEventListener('click', closeReadModal);
+  readCancelBtn.addEventListener('click',  closeReadModal);
+  readModal.addEventListener('click', e => { if (e.target === readModal) closeReadModal(); });
+
+  readConnectBtn.addEventListener('click', async () => {
+    readConnectBtn.disabled = true;
+    readProgressWrap.classList.add('visible');
+    readProgressFill.style.width  = '0%';
+    readProgressLbl.textContent   = '0%';
+    setReadStatus('Connecting…', 'muted');
+
+    try {
+      const buf = await cpwrReadCodeplug(({ pct, msg }) => {
+        readProgressFill.style.width  = `${pct}%`;
+        readProgressLbl.textContent   = `${pct}%`;
+        setReadStatus(msg || '', 'muted');
+      });
+      readProgressFill.style.width  = '100%';
+      readProgressLbl.textContent   = '100%';
+      setReadStatus('Read complete.', 'ok');
+
+      codeplug          = new CodeplugParser(buf);
+      codeplug.filename = 'radio_read.cdmr';
+      closeReadModal();
+      renderAll();
+    } catch (err) {
+      if (err.name === 'NotFoundError') {
+        setReadStatus('No device selected.', 'muted');
+      } else {
+        setReadStatus(`Read failed: ${err.message}`, 'err');
+      }
+      readConnectBtn.disabled = false;
     }
   });
 

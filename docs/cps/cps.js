@@ -491,6 +491,31 @@ class CodeplugParser {
     }
   }
 
+  // ── Band limits ───────────────────────────────────────────────────────────────
+  // struct_codeplugDeviceInfo_t at DEVICE_INFO + 0..6:
+  //   +0 minUHFFreq  +2 maxUHFFreq  +4 minVHFFreq  +6 maxVHFFreq
+  // Each is a uint16_t stored little-endian BCD, value in MHz.
+
+  get bandLimits() {
+    const v    = this.view;
+    const base = ADDR.DEVICE_INFO;
+    return {
+      minUHF: bcd2int(v.getUint16(base + 0, true)),
+      maxUHF: bcd2int(v.getUint16(base + 2, true)),
+      minVHF: bcd2int(v.getUint16(base + 4, true)),
+      maxVHF: bcd2int(v.getUint16(base + 6, true)),
+    };
+  }
+
+  writeBandLimits({ minUHF, maxUHF, minVHF, maxVHF }) {
+    const v    = this.view;
+    const base = ADDR.DEVICE_INFO;
+    v.setUint16(base + 0, int2bcd(minUHF), true);
+    v.setUint16(base + 2, int2bcd(maxUHF), true);
+    v.setUint16(base + 4, int2bcd(minVHF), true);
+    v.setUint16(base + 6, int2bcd(maxVHF), true);
+  }
+
   // ── Boot image ────────────────────────────────────────────────────────────────
 
   get bootImage() {

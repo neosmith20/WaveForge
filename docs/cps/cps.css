@@ -1115,6 +1115,25 @@ tr.drag-over td { box-shadow: inset 0 2px 0 var(--blue) !important; }
 }
 .btn-sm-write:hover:not(:disabled) { background: #166534; }
 
+/* ── Read from Radio button ──────────────────────────────────────────────── */
+
+.btn-sm-read {
+  background: #164e63;
+  border: 1px solid #0e7490;
+  color: #67e8f9;
+}
+.btn-sm-read:hover:not(:disabled) { background: #155e75; }
+
+/* ── Drop zone action buttons ────────────────────────────────────────────── */
+
+.drop-zone-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
 .write-modal {
   background: var(--surface);
   border: 1px solid var(--border);
