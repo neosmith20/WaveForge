@@ -89,6 +89,29 @@ async function cpwrFlashSector(writer, acc, spiAddr, sectorData) {
   await cpwrRequest(writer, acc, new Uint8Array([CPWR_CMD_BYTE, CPWR_SUB_WRITE]));
 }
 
+// Drain any bytes left in the OS serial receive buffer from a previous session
+// (e.g., a read session whose port was closed without consuming all bytes).
+// Reads and discards bytes until no data arrives for DRAIN_MS milliseconds.
+async function cpwrDrainBuffer(port) {
+  const reader = port.readable.getReader();
+  const DRAIN_MS = 150;
+  try {
+    let hasMore = true;
+    while (hasMore) {
+      hasMore = await new Promise(resolve => {
+        const timer = setTimeout(() => resolve(false), DRAIN_MS);
+        reader.read().then(
+          ({ done }) => { clearTimeout(timer); resolve(!done); },
+          ()         => { clearTimeout(timer); resolve(false); }
+        );
+      });
+    }
+  } finally {
+    // releaseLock() cancels any in-flight reader.read(); suppress that rejection.
+    try { reader.releaseLock(); } catch (_) {}
+  }
+}
+
 // Write an ArrayBuffer codeplug to the radio via USB CDC.
 // onProgress({ phase: 'write', pct: 0-100, msg: string })
 async function cpwrWriteCodeplug(arrayBuffer, onProgress) {
@@ -103,6 +126,8 @@ async function cpwrWriteCodeplug(arrayBuffer, onProgress) {
   try {
     port = await navigator.serial.requestPort({ filters: CPWR_SERIAL_FILTERS });
     await port.open({ baudRate: 115200 });
+    // Drain any stale bytes from the OS buffer before starting write commands.
+    await cpwrDrainBuffer(port);
     writer = port.writable.getWriter();
     acc    = new SerialAccumulator(port.readable.getReader());
 
