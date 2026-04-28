@@ -7,76 +7,66 @@
 //
 // Request packet (8 bytes):
 //   [0]    'R' (0x52)
-//   [1]    area: 1=SPI Flash, 2=EEPROM (EEPROM aliases to SPI Flash at offset 0 for MDUV380)
+//   [1]    area: 1=SPI Flash, 2=EEPROM
 //   [2..5] address (big-endian uint32)
-//   [6..7] length  (big-endian uint16, max 2045)
+//   [6..7] length  (big-endian uint16)
 //
 // Response on success: ['R', len_hi, len_lo, data...]
 // Response on error:   ['-']
 //
-// Codeplug file layout (128 KB) and sparse-read strategy:
-//
-//   The Web CPS parser (`cps.js`) only touches a handful of exact address ranges.
-//   Some radios return errors or even soft-lock when large contiguous reads cross
-//   sparse / unmapped gaps, so we do not read 32 KB / 64 KB synthetic regions.
-//
-//   Instead we:
-//     1. Probe the zone area with both access modes using small reads.
-//     2. Build the exact set of file ranges that `cps.js` actually uses.
-//     3. Merge only adjacent/overlapping ranges that share the same access policy.
-//     4. Read each merged range in conservative chunks clipped to that range only.
-//
-//   For file offsets >= 0x10000, SPI Flash hardware address = file offset + 0x90000.
-//   CONTACTS example: file 0x17620 → hw 0xA7620.
+// This reader intentionally does NOT attempt to dump broad contiguous regions.
+// The radio's CPS-accessible memory appears sparse / fragile: small targeted
+// reads succeed, while bulk/range-style reads can fail and eventually soft-lock
+// the radio. To keep "Read from Radio" usable, we only fetch the exact
+// structures the Web CPS requires for channels, zones, and contacts.
 
 const CPRD_SERIAL_FILTERS = [{ usbVendorId: 0x1FC9, usbProductId: 0x0094 }];
 
-const CPRD_AREA_EEPROM    = 2;
-const CPRD_AREA_FLASH     = 1;
-const CPRD_FILE_SIZE      = 0x20000;    // 128 KB
-const CPRD_MAX_RETRIES    = 2;          // retry transient chunk failures before giving up
-const CPRD_PROBE_LEN      = 32;
-const CPRD_CHUNK_SMALL    = 128;
-const CPRD_CHUNK_MEDIUM   = 256;
+const CPRD_AREA_FLASH  = 1;
+const CPRD_AREA_EEPROM = 2;
 
-// SPI Flash hw base address for the third (SPI Flash) region.
-// = file offset 0x10000 + FLASH_ADDRESS_OFFSET(0x20000) + 0x70000 = 0xA0000
-const CPRD_FLASH_HW_BASE  = 0xA0000;
-const CPRD_FLASH_FILE_BASE = 0x10000;
+const CPRD_FILE_SIZE         = 0x20000;
+const CPRD_FLASH_FILE_BASE   = 0x10000;
+const CPRD_FLASH_HW_BASE     = 0xA0000;
+const CPRD_INTER_REQUEST_MS  = 20;
+const CPRD_ERROR_BACKOFF_MS  = 150;
+const CPRD_MAX_RETRIES       = 1; // one extra attempt at most
+const CPRD_ZONE_PROBE_LEN    = 32;
 
-const CPRD_DEVICE_INFO_OFFSET  = 0x0080;
-const CPRD_DEVICE_INFO_SIZE    = 8;     // band limits used by cps.js
+const CPRD_DEVICE_INFO_OFFSET      = 0x0080;
+const CPRD_DEVICE_INFO_SIZE        = 8;
 const CPRD_GENERAL_SETTINGS_OFFSET = 0x00E0;
 const CPRD_GENERAL_SETTINGS_SIZE   = 12;
-const CPRD_CHAN_BITMAP_OFFSET  = 0x3780;
-const CPRD_CHAN_BITMAP_SIZE    = 16;
-const CPRD_CHANNELS_OFFSET     = 0x3790;
-const CPRD_CHANNELS_SIZE       = 128 * 56;
-const CPRD_BOOT_IMAGE_OFFSET   = 0x6B40;
-const CPRD_BOOT_IMAGE_SIZE     = 160 * 128 / 8;
-const CPRD_BOOT_TUNE_OFFSET    = 0x7518;
-const CPRD_BOOT_TUNE_SIZE      = 10 * 4;
-const CPRD_BOOT_LINE1_OFFSET   = 0x7540;
-const CPRD_BOOT_LINE_SIZE      = 16;
+
+const CPRD_CHAN_BITMAP_OFFSET = 0x3780;
+const CPRD_CHAN_BITMAP_SIZE   = 16;
+const CPRD_CHANNELS_OFFSET    = 0x3790;
+const CPRD_CHANNEL_SIZE       = 56;
+const CPRD_CHANNELS_MAX       = 128;
+
 const CPRD_ZONE_BITMAP_OFFSET = 0x8010;
 const CPRD_ZONE_BITMAP_SIZE   = 32;
 const CPRD_ZONE_LIST_OFFSET   = 0x8030;
 const CPRD_ZONE_FMT_OFFSET    = 0x806F;
-const CPRD_ZONE_LIST_MAX_SIZE = 68 * (16 + 80 * 2); // max 80-ch OpenGD77 layout
-const CPRD_CONTACTS_OFFSET    = 0x17620;
-const CPRD_CONTACTS_SIZE      = 1024 * 24;
-const CPRD_RXG_LEN_OFFSET     = 0x1D620;
-const CPRD_RXG_LEN_SIZE       = 76;     // firmware CODEPLUG_RX_GROUPLIST_MAX
-const CPRD_RXG_DATA_OFFSET    = 0x1D6A0;
-const CPRD_RXG_DATA_SIZE      = 76 * 82;
+const CPRD_ZONES_MAX          = 68;
+const CPRD_ZONE_NAME_SIZE     = 16;
+
+const CPRD_CONTACTS_OFFSET = 0x17620;
+const CPRD_CONTACT_SIZE    = 24;
+const CPRD_CONTACTS_MAX    = 1024;
+
+// Optional sections intentionally skipped during live radio reads for safety:
+// boot image, boot tune, boot screen text, VFO data, RX groups.
 
 const CPRD_REF_ZONE_BITMAP_PREFIX = new Uint8Array([0x3F, 0x00]);
 const CPRD_REF_ZONE0_NAME         = new Uint8Array([0x41, 0x6E, 0x61, 0x6C, 0x6F, 0x67]); // "Analog"
 const CPRD_REF_ZONE0_REFS_PREFIX  = new Uint8Array([0x01, 0x00, 0x35, 0x00, 0x02, 0x00, 0x03, 0x00]);
 const CPRD_REF_ZONE_PROBE         = 0x00;
 
-// Accumulate bytes from the Web Serial readable stream, preserving leftover bytes
-// across reads so USB packet boundaries never split a logical response.
+function cprdDelay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 class SerialAccumulator {
   constructor(reader) {
     this._reader  = reader;
@@ -103,8 +93,15 @@ class SerialAccumulator {
   releaseLock() { this._reader.releaseLock(); }
 }
 
-// Send one CPS 'R' request; return the data bytes or null on a device error response.
+function cprdFileOffsetToHwAddr(fileOffset) {
+  return (fileOffset < CPRD_FLASH_FILE_BASE)
+    ? fileOffset
+    : (CPRD_FLASH_HW_BASE + (fileOffset - CPRD_FLASH_FILE_BASE));
+}
+
 async function cprdRequest(writer, acc, areaType, hwAddr, length) {
+  await cprdDelay(CPRD_INTER_REQUEST_MS);
+
   const req = new Uint8Array(8);
   req[0] = 0x52; // 'R'
   req[1] = areaType;
@@ -117,15 +114,10 @@ async function cprdRequest(writer, acc, areaType, hwAddr, length) {
   await writer.write(req);
 
   const status = await acc.readExact(1);
-  if (status[0] !== 0x52) return null;  // '-' = device error for this chunk
+  if (status[0] !== 0x52) return null;
   const lenBytes = await acc.readExact(2);
   const respLen  = (lenBytes[0] << 8) | lenBytes[1];
   return acc.readExact(respLen);
-}
-
-function cprdHexSlice(fileBuf, offset, length) {
-  return Array.from(fileBuf.subarray(offset, offset + length), b =>
-    b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
 }
 
 function cprdHexData(data, maxLen) {
@@ -133,6 +125,10 @@ function cprdHexData(data, maxLen) {
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
   return Array.from(bytes.subarray(0, maxLen), b =>
     b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+}
+
+function cprdHexSlice(fileBuf, offset, length) {
+  return cprdHexData(fileBuf.subarray(offset, offset + length), length);
 }
 
 function cprdAsciiData(data, maxLen) {
@@ -174,13 +170,13 @@ function cprdAssessZoneProbe(offset, data) {
 
   if (offset === CPRD_ZONE_BITMAP_OFFSET) {
     const allFF = data.every(b => b === 0xFF);
-    const anySet = data.some(b => b !== 0x00 && b !== 0xFF);
+    const anyNonFF = data.some(b => b !== 0xFF);
     return {
-      score: allFF ? 0 : (anySet ? 2 : 1),
+      score: allFF ? 0 : (anyNonFF ? 2 : 1),
       details: {
         ok: true,
         allFF,
-        anySet,
+        anyNonFF,
         live: cprdHexData(data, Math.min(data.length, 16)),
       },
     };
@@ -191,7 +187,7 @@ function cprdAssessZoneProbe(offset, data) {
     const namePlausible = cprdIsPrintableZoneName(nameBytes);
     let saneRefs = 0;
     let implausibleRefs = 0;
-    for (let i = 16; i + 1 < Math.min(data.length, 32); i += 2) {
+    for (let i = 16; i + 1 < data.length; i += 2) {
       const ref = data[i] | (data[i + 1] << 8);
       if (ref === 0 || ref === 0xFFFF || (ref >= 1 && ref <= 1024)) saneRefs++;
       else implausibleRefs++;
@@ -205,7 +201,7 @@ function cprdAssessZoneProbe(offset, data) {
         implausibleRefs,
         liveNameHex: cprdHexData(nameBytes, 16),
         liveNameAscii: cprdAsciiData(nameBytes, 16),
-        liveRefs: cprdHexData(data.subarray(16, 24), 8),
+        liveRefs: cprdHexData(data.subarray(16), Math.min(8, data.length - 16)),
       },
     };
   }
@@ -226,15 +222,13 @@ function cprdAssessZoneProbe(offset, data) {
 }
 
 function cprdCompareZoneProbeToReference(offset, data) {
-  if (!data) return { score: 0, details: { ok: false } };
+  if (!data) return { details: { ok: false } };
 
   if (offset === CPRD_ZONE_BITMAP_OFFSET) {
-    const bitmapPrefixMatches = cprdStartsWith(data, CPRD_REF_ZONE_BITMAP_PREFIX);
     return {
-      score: bitmapPrefixMatches ? 2 : 0,
       details: {
         ok: true,
-        bitmapPrefixMatches,
+        bitmapPrefixMatches: cprdStartsWith(data, CPRD_REF_ZONE_BITMAP_PREFIX),
         live: cprdHexData(data, Math.min(data.length, 16)),
         reference: cprdHexData(CPRD_REF_ZONE_BITMAP_PREFIX, CPRD_REF_ZONE_BITMAP_PREFIX.length),
       },
@@ -242,17 +236,14 @@ function cprdCompareZoneProbeToReference(offset, data) {
   }
 
   if (offset === CPRD_ZONE_LIST_OFFSET) {
-    const nameMatches = cprdStartsWith(data, CPRD_REF_ZONE0_NAME);
-    const refsMatch   = cprdStartsWith(data, CPRD_REF_ZONE0_REFS_PREFIX, 16);
     return {
-      score: (nameMatches ? 2 : 0) + (refsMatch ? 2 : 0),
       details: {
         ok: true,
-        nameMatches,
-        refsMatch,
+        nameMatches: cprdStartsWith(data, CPRD_REF_ZONE0_NAME),
+        refsMatch: cprdStartsWith(data, CPRD_REF_ZONE0_REFS_PREFIX, 16),
         liveNameHex: cprdHexData(data.subarray(0, 16), 16),
         liveNameAscii: cprdAsciiData(data.subarray(0, 16), 16),
-        liveRefs: cprdHexData(data.subarray(16, 24), 8),
+        liveRefs: cprdHexData(data.subarray(16), Math.min(8, data.length - 16)),
         referenceNameAscii: 'Analog',
         referenceRefs: cprdHexData(CPRD_REF_ZONE0_REFS_PREFIX, CPRD_REF_ZONE0_REFS_PREFIX.length),
       },
@@ -260,160 +251,82 @@ function cprdCompareZoneProbeToReference(offset, data) {
   }
 
   if (offset === CPRD_ZONE_FMT_OFFSET) {
-    const probeMatches = data.length > 0 && data[0] === CPRD_REF_ZONE_PROBE;
     return {
-      score: probeMatches ? 1 : 0,
       details: {
         ok: true,
-        probeMatches,
+        probeMatches: data.length > 0 && data[0] === CPRD_REF_ZONE_PROBE,
         live: cprdHexData(data, 1),
         reference: '00',
       },
     };
   }
 
-  return { score: 0, details: { ok: true } };
+  return { details: { ok: true } };
 }
 
-async function cprdTryRead(writer, acc, areaType, hwAddr, length, context) {
-  for (let attempt = 0; attempt <= CPRD_MAX_RETRIES; attempt++) {
-    const data = await cprdRequest(writer, acc, areaType, hwAddr, length);
-    if (data) return data.subarray(0, length);
-    console.debug('[cpwrReadCodeplug] chunk read failed', {
+function cprdBitIndices(bitmap, maxBits) {
+  const out = [];
+  for (let i = 0; i < maxBits; i++) {
+    const byteIdx = i >> 3;
+    if (bitmap[byteIdx] & (1 << (i & 7))) out.push(i);
+  }
+  return out;
+}
+
+async function cprdReadOnce(writer, acc, areaType, fileOffset, length, context) {
+  const hwAddr = cprdFileOffsetToHwAddr(fileOffset);
+  const data = await cprdRequest(writer, acc, areaType, hwAddr, length);
+  if (!data) {
+    console.debug('[cpwrReadCodeplug] read failed', {
       context,
       area: areaType,
-      attempt: attempt + 1,
+      fileOffset: '0x' + fileOffset.toString(16).toUpperCase().padStart(5, '0'),
       hwAddr: '0x' + hwAddr.toString(16).toUpperCase().padStart(5, '0'),
       length,
     });
+    return { data: null, hwAddr };
   }
-  return null;
+  return { data: data.subarray(0, length), hwAddr };
 }
 
-async function cprdProbeAccess(writer, acc, areaType, hwAddr, length, label) {
-  const data = await cprdTryRead(writer, acc, areaType, hwAddr, length, `probe ${label}`);
-  return { ok: !!data, data };
-}
+async function cprdReadWithFallback(writer, acc, fileOffset, length, primaryArea, secondaryArea, context) {
+  const triedAreas = [];
+  let { data, hwAddr } = await cprdReadOnce(writer, acc, primaryArea, fileOffset, length, context);
+  triedAreas.push(primaryArea);
+  if (data) return { data, hwAddr, triedAreas };
 
-function cprdSparseRange(start, end, label, primaryArea, secondaryArea, chunkSize) {
-  return { start, end, label, primaryArea, secondaryArea, chunkSize };
-}
-
-function cprdMergeRanges(ranges) {
-  const sorted = [...ranges].sort((a, b) => a.start - b.start);
-  const merged = [];
-  for (const range of sorted) {
-    const prev = merged[merged.length - 1];
-    if (prev &&
-        range.start <= prev.end &&
-        range.primaryArea === prev.primaryArea &&
-        range.secondaryArea === prev.secondaryArea &&
-        range.chunkSize === prev.chunkSize) {
-      prev.end = Math.max(prev.end, range.end);
-      prev.labels.push(range.label);
-    } else {
-      merged.push({ ...range, labels: [range.label] });
-    }
+  if (secondaryArea !== null && secondaryArea !== primaryArea && CPRD_MAX_RETRIES > 0) {
+    await cprdDelay(CPRD_ERROR_BACKOFF_MS);
+    const retry = await cprdReadOnce(writer, acc, secondaryArea, fileOffset, length, `${context} fallback`);
+    triedAreas.push(secondaryArea);
+    if (retry.data) return { data: retry.data, hwAddr: retry.hwAddr, triedAreas };
+    hwAddr = retry.hwAddr;
   }
-  return merged;
+
+  await cprdDelay(CPRD_ERROR_BACKOFF_MS);
+  return { data: null, hwAddr, triedAreas };
 }
 
-function cprdBuildReadRanges(zonePreferredArea) {
-  const zoneFallbackArea = zonePreferredArea === CPRD_AREA_EEPROM ? CPRD_AREA_FLASH : CPRD_AREA_EEPROM;
-  const ranges = [
-    cprdSparseRange(
-      CPRD_DEVICE_INFO_OFFSET,
-      CPRD_DEVICE_INFO_OFFSET + CPRD_DEVICE_INFO_SIZE,
-      'device-info',
-      CPRD_AREA_EEPROM, CPRD_AREA_FLASH, CPRD_CHUNK_SMALL
-    ),
-    cprdSparseRange(
-      CPRD_GENERAL_SETTINGS_OFFSET,
-      CPRD_GENERAL_SETTINGS_OFFSET + CPRD_GENERAL_SETTINGS_SIZE,
-      'general-settings',
-      CPRD_AREA_EEPROM, CPRD_AREA_FLASH, CPRD_CHUNK_SMALL
-    ),
-    cprdSparseRange(
-      CPRD_CHAN_BITMAP_OFFSET,
-      CPRD_CHANNELS_OFFSET + CPRD_CHANNELS_SIZE,
-      'channels',
-      CPRD_AREA_EEPROM, CPRD_AREA_FLASH, CPRD_CHUNK_SMALL
-    ),
-    cprdSparseRange(
-      CPRD_BOOT_IMAGE_OFFSET,
-      CPRD_BOOT_IMAGE_OFFSET + CPRD_BOOT_IMAGE_SIZE,
-      'boot-image',
-      CPRD_AREA_EEPROM, CPRD_AREA_FLASH, CPRD_CHUNK_SMALL
-    ),
-    cprdSparseRange(
-      CPRD_BOOT_TUNE_OFFSET,
-      CPRD_BOOT_TUNE_OFFSET + CPRD_BOOT_TUNE_SIZE,
-      'boot-tune',
-      CPRD_AREA_EEPROM, CPRD_AREA_FLASH, CPRD_CHUNK_SMALL
-    ),
-    cprdSparseRange(
-      CPRD_BOOT_LINE1_OFFSET,
-      CPRD_BOOT_LINE1_OFFSET + CPRD_BOOT_LINE_SIZE,
-      'boot-line1',
-      CPRD_AREA_EEPROM, CPRD_AREA_FLASH, CPRD_CHUNK_SMALL
-    ),
-    cprdSparseRange(
-      CPRD_BOOT_LINE1_OFFSET + CPRD_BOOT_LINE_SIZE,
-      CPRD_BOOT_LINE1_OFFSET + CPRD_BOOT_LINE_SIZE * 2,
-      'boot-line2',
-      CPRD_AREA_EEPROM, CPRD_AREA_FLASH, CPRD_CHUNK_SMALL
-    ),
-    cprdSparseRange(
-      CPRD_ZONE_BITMAP_OFFSET,
-      CPRD_ZONE_LIST_OFFSET + CPRD_ZONE_LIST_MAX_SIZE,
-      'zones',
-      zonePreferredArea, zoneFallbackArea, CPRD_CHUNK_SMALL
-    ),
-    cprdSparseRange(
-      CPRD_CONTACTS_OFFSET,
-      CPRD_CONTACTS_OFFSET + CPRD_CONTACTS_SIZE,
-      'contacts',
-      CPRD_AREA_FLASH, null, CPRD_CHUNK_MEDIUM
-    ),
-    cprdSparseRange(
-      CPRD_RXG_LEN_OFFSET,
-      CPRD_RXG_LEN_OFFSET + CPRD_RXG_LEN_SIZE,
-      'rxg-lengths',
-      CPRD_AREA_FLASH, null, CPRD_CHUNK_MEDIUM
-    ),
-    cprdSparseRange(
-      CPRD_RXG_DATA_OFFSET,
-      CPRD_RXG_DATA_OFFSET + CPRD_RXG_DATA_SIZE,
-      'rxg-data',
-      CPRD_AREA_FLASH, null, CPRD_CHUNK_MEDIUM
-    ),
-  ];
-  return cprdMergeRanges(ranges);
-}
-
-function cprdFileOffsetToHwAddr(fileOffset) {
-  return (fileOffset < CPRD_FLASH_FILE_BASE)
-    ? fileOffset
-    : (CPRD_FLASH_HW_BASE + (fileOffset - CPRD_FLASH_FILE_BASE));
+function cprdWrite(fileBuf, fileOffset, data) {
+  if (data) fileBuf.set(data, fileOffset);
 }
 
 async function cprdChooseZoneArea(writer, acc) {
   const probes = [
-    { offset: CPRD_ZONE_BITMAP_OFFSET, length: 32, label: 'bitmap_0x8010' },
-    { offset: CPRD_ZONE_LIST_OFFSET,   length: 32, label: 'zone0_0x8030'  },
-    { offset: CPRD_ZONE_FMT_OFFSET,    length: 1,  label: 'probe_0x806F'  },
+    { offset: CPRD_ZONE_BITMAP_OFFSET, length: CPRD_ZONE_PROBE_LEN, label: 'bitmap_0x8010' },
+    { offset: CPRD_ZONE_LIST_OFFSET,   length: 24,                  label: 'zone0_0x8030'  },
+    { offset: CPRD_ZONE_FMT_OFFSET,    length: 1,                   label: 'probe_0x806F'  },
   ];
-  const results = {};
+  const results = { [CPRD_AREA_EEPROM]: [], [CPRD_AREA_FLASH]: [] };
 
   for (const areaType of [CPRD_AREA_EEPROM, CPRD_AREA_FLASH]) {
-    results[areaType] = [];
     for (const probe of probes) {
-      const result = await cprdProbeAccess(writer, acc, areaType, probe.offset, probe.length, probe.label);
+      const result = await cprdReadOnce(writer, acc, areaType, probe.offset, probe.length, `probe ${probe.label}`);
       const heuristic = cprdAssessZoneProbe(probe.offset, result.data);
-      const compare = cprdCompareZoneProbeToReference(probe.offset, result.data);
+      const compare   = cprdCompareZoneProbeToReference(probe.offset, result.data);
       results[areaType].push({
         label: probe.label,
-        ok: result.ok,
+        ok: !!result.data,
         data: cprdHexData(result.data, probe.length),
         heuristic: heuristic.details,
         compare: compare.details,
@@ -422,19 +335,14 @@ async function cprdChooseZoneArea(writer, acc) {
     }
   }
 
-  const eepromScore = results[CPRD_AREA_EEPROM].filter(r => r.ok).length;
-  const flashScore  = results[CPRD_AREA_FLASH].filter(r => r.ok).length;
-  const eepromHeuristicScore = results[CPRD_AREA_EEPROM].reduce((sum, r) => sum + r.score, 0);
-  const flashHeuristicScore  = results[CPRD_AREA_FLASH].reduce((sum, r) => sum + r.score, 0);
-  const preferredArea =
-    (flashHeuristicScore > eepromHeuristicScore) ? CPRD_AREA_FLASH :
-    (eepromHeuristicScore > flashHeuristicScore) ? CPRD_AREA_EEPROM :
-    (flashScore > eepromScore) ? CPRD_AREA_FLASH : CPRD_AREA_EEPROM;
+  const eepromScore = results[CPRD_AREA_EEPROM].reduce((sum, r) => sum + r.score, 0);
+  const flashScore  = results[CPRD_AREA_FLASH].reduce((sum, r) => sum + r.score, 0);
+  const preferredArea = (flashScore > eepromScore) ? CPRD_AREA_FLASH : CPRD_AREA_EEPROM;
 
   console.debug('[cpwrReadCodeplug] zone access probe', {
     preferredArea,
-    eepromHeuristicScore,
-    flashHeuristicScore,
+    eepromScore,
+    flashScore,
     eeprom: results[CPRD_AREA_EEPROM],
     flash: results[CPRD_AREA_FLASH],
   });
@@ -442,22 +350,15 @@ async function cprdChooseZoneArea(writer, acc) {
   return preferredArea;
 }
 
-function cprdLogReadDebug(fileBuf, chunkFailures, ranges) {
-  const zoneBitmap = fileBuf.subarray(CPRD_ZONE_BITMAP_OFFSET, CPRD_ZONE_BITMAP_OFFSET + 32);
-  const zone0      = fileBuf.subarray(CPRD_ZONE_LIST_OFFSET, CPRD_ZONE_LIST_OFFSET + 32);
+function cprdLogReadDebug(fileBuf, failures, stats) {
+  const zoneBitmap = fileBuf.subarray(CPRD_ZONE_BITMAP_OFFSET, CPRD_ZONE_BITMAP_OFFSET + CPRD_ZONE_BITMAP_SIZE);
+  const zone0      = fileBuf.subarray(CPRD_ZONE_LIST_OFFSET, CPRD_ZONE_LIST_OFFSET + 24);
   const zoneProbe  = fileBuf.subarray(CPRD_ZONE_FMT_OFFSET, CPRD_ZONE_FMT_OFFSET + 1);
   console.debug('[cpwrReadCodeplug] read debug', {
-    sparseRanges: ranges.map(r => ({
-      label: r.labels.join(','),
-      fileStart: '0x' + r.start.toString(16).toUpperCase().padStart(5, '0'),
-      fileEnd: '0x' + r.end.toString(16).toUpperCase().padStart(5, '0'),
-      primaryArea: r.primaryArea,
-      secondaryArea: r.secondaryArea,
-      chunkSize: r.chunkSize,
-    })),
-    bitmap_0x8010: cprdHexSlice(fileBuf, CPRD_ZONE_BITMAP_OFFSET, 32),
-    zone0_0x8030:  cprdHexSlice(fileBuf, CPRD_ZONE_LIST_OFFSET, 32),
-    probe_0x806F:  cprdHexSlice(fileBuf, CPRD_ZONE_FMT_OFFSET, 1),
+    stats,
+    bitmap_0x8010: cprdHexData(zoneBitmap, 32),
+    zone0_0x8030:  cprdHexData(zone0, 24),
+    probe_0x806F:  cprdHexData(zoneProbe, 1),
     heuristicCompare: {
       bitmap_0x8010: cprdAssessZoneProbe(CPRD_ZONE_BITMAP_OFFSET, zoneBitmap).details,
       zone0_0x8030:  cprdAssessZoneProbe(CPRD_ZONE_LIST_OFFSET, zone0).details,
@@ -468,18 +369,16 @@ function cprdLogReadDebug(fileBuf, chunkFailures, ranges) {
       zone0_0x8030:  cprdCompareZoneProbeToReference(CPRD_ZONE_LIST_OFFSET, zone0).details,
       probe_0x806F:  cprdCompareZoneProbeToReference(CPRD_ZONE_FMT_OFFSET, zoneProbe).details,
     },
-    failedChunks:  chunkFailures.map(f => ({
-      label:      f.label,
+    failures: failures.map(f => ({
+      label: f.label,
       triedAreas: f.triedAreas,
       fileOffset: '0x' + f.fileOffset.toString(16).toUpperCase().padStart(5, '0'),
-      hwAddr:     '0x' + f.hwAddr.toString(16).toUpperCase().padStart(5, '0'),
-      length:     f.length,
+      hwAddr: '0x' + f.hwAddr.toString(16).toUpperCase().padStart(5, '0'),
+      length: f.length,
     })),
   });
 }
 
-// Read the radio's full codeplug via USB CDC and return it as an ArrayBuffer.
-// onProgress({ phase: 'read', pct: 0-100, msg: string })
 async function cpwrReadCodeplug(onProgress) {
   if (!navigator.serial) {
     throw new Error('Web Serial API not available. Use Chrome or Edge 89+.');
@@ -492,67 +391,172 @@ async function cpwrReadCodeplug(onProgress) {
   let writer = null;
   let acc    = null;
 
+  const failures = [];
+  const stats = {
+    zoneArea: null,
+    channelsActive: 0,
+    channelsRead: 0,
+    zonesActive: 0,
+    zonesRead: 0,
+    contactsRead: 0,
+    contactsStoppedAt: null,
+    skippedOptional: ['boot-image', 'boot-tune', 'boot-screen', 'vfo', 'rx-groups'],
+  };
+
+  const reportFailure = (label, fileOffset, length, hwAddr, triedAreas) => {
+    failures.push({ label, fileOffset, length, hwAddr, triedAreas });
+  };
+
   try {
     port = await navigator.serial.requestPort({ filters: CPRD_SERIAL_FILTERS });
     await port.open({ baudRate: 115200 });
     writer = port.writable.getWriter();
     acc    = new SerialAccumulator(port.readable.getReader());
 
-    onProgress({ phase: 'read', pct: 0, msg: 'Probing radio read access…' });
-    const zonePreferredArea = await cprdChooseZoneArea(writer, acc);
-    const ranges = cprdBuildReadRanges(zonePreferredArea);
+    onProgress({ phase: 'read', pct: 0, msg: 'Probing zone access…' });
+    const zoneArea = await cprdChooseZoneArea(writer, acc);
+    stats.zoneArea = zoneArea;
+    const zoneFallbackArea = zoneArea === CPRD_AREA_EEPROM ? CPRD_AREA_FLASH : CPRD_AREA_EEPROM;
 
-    const totalChunks = ranges.reduce((sum, range) =>
-      sum + Math.ceil((range.end - range.start) / range.chunkSize), 0);
-    let chunksDone = 0;
-    const chunkFailures = [];
+    onProgress({ phase: 'read', pct: 5, msg: 'Reading settings…' });
 
-    const readRange = async (range) => {
-      for (let fileOffset = range.start; fileOffset < range.end; fileOffset += range.chunkSize) {
-        const len = Math.min(range.chunkSize, range.end - fileOffset);
-        const hwAddr = cprdFileOffsetToHwAddr(fileOffset);
-        const triedAreas = [];
-        let data = await cprdTryRead(writer, acc, range.primaryArea, hwAddr, len, `${range.label} primary`);
-        triedAreas.push(range.primaryArea);
-        if (!data && range.secondaryArea !== null && range.secondaryArea !== range.primaryArea) {
-          console.debug('[cpwrReadCodeplug] retrying chunk with alternate area', {
-            label: range.label,
-            fileOffset: '0x' + fileOffset.toString(16).toUpperCase().padStart(5, '0'),
-            hwAddr: '0x' + hwAddr.toString(16).toUpperCase().padStart(5, '0'),
-            primaryArea: range.primaryArea,
-            secondaryArea: range.secondaryArea,
-          });
-          data = await cprdTryRead(writer, acc, range.secondaryArea, hwAddr, len, `${range.label} fallback`);
-          triedAreas.push(range.secondaryArea);
-        }
-        if (data) {
-          fileBuf.set(data.subarray(0, len), fileOffset);
-        } else {
-          chunkFailures.push({ label: range.label, triedAreas, fileOffset, hwAddr, length: len });
-        }
-        chunksDone++;
-        const pct = Math.round((chunksDone / totalChunks) * 100);
-        onProgress({ phase: 'read', pct, msg: `Reading ${range.labels.join(', ')}… ${pct}%` });
+    {
+      const r = await cprdReadWithFallback(writer, acc,
+        CPRD_DEVICE_INFO_OFFSET, CPRD_DEVICE_INFO_SIZE,
+        CPRD_AREA_EEPROM, CPRD_AREA_FLASH, 'device-info');
+      cprdWrite(fileBuf, CPRD_DEVICE_INFO_OFFSET, r.data);
+      if (!r.data) reportFailure('device-info', CPRD_DEVICE_INFO_OFFSET, CPRD_DEVICE_INFO_SIZE, r.hwAddr, r.triedAreas);
+    }
+
+    {
+      const r = await cprdReadWithFallback(writer, acc,
+        CPRD_GENERAL_SETTINGS_OFFSET, CPRD_GENERAL_SETTINGS_SIZE,
+        CPRD_AREA_EEPROM, CPRD_AREA_FLASH, 'general-settings');
+      cprdWrite(fileBuf, CPRD_GENERAL_SETTINGS_OFFSET, r.data);
+      if (!r.data) reportFailure('general-settings', CPRD_GENERAL_SETTINGS_OFFSET, CPRD_GENERAL_SETTINGS_SIZE, r.hwAddr, r.triedAreas);
+    }
+
+    let chanBitmap = null;
+    {
+      const r = await cprdReadWithFallback(writer, acc,
+        CPRD_CHAN_BITMAP_OFFSET, CPRD_CHAN_BITMAP_SIZE,
+        CPRD_AREA_EEPROM, CPRD_AREA_FLASH, 'channel-bitmap');
+      cprdWrite(fileBuf, CPRD_CHAN_BITMAP_OFFSET, r.data);
+      if (!r.data) {
+        reportFailure('channel-bitmap', CPRD_CHAN_BITMAP_OFFSET, CPRD_CHAN_BITMAP_SIZE, r.hwAddr, r.triedAreas);
+        chanBitmap = new Uint8Array(CPRD_CHAN_BITMAP_SIZE);
+      } else {
+        chanBitmap = r.data;
       }
-    };
-
-    for (const range of ranges) {
-      await readRange(range);
     }
 
-    cprdLogReadDebug(fileBuf, chunkFailures, ranges);
+    const activeChannels = cprdBitIndices(chanBitmap, CPRD_CHANNELS_MAX);
+    stats.channelsActive = activeChannels.length;
 
-    if (chunkFailures.length > 0) {
-      const sample = chunkFailures.slice(0, 4).map(f =>
-        `${f.label} file 0x${f.fileOffset.toString(16).toUpperCase().padStart(5, '0')} ` +
-        `(areas=${f.triedAreas.join('->')}, hw=0x${f.hwAddr.toString(16).toUpperCase().padStart(5, '0')})`
-      ).join(', ');
-      throw new Error(
-        `Radio returned ${chunkFailures.length} failed codeplug read(s): ${sample}. ` +
-        `Aborting instead of leaving 0xFF-filled gaps in the codeplug image.`
-      );
+    for (let i = 0; i < activeChannels.length; i++) {
+      const slot = activeChannels[i];
+      const fileOffset = CPRD_CHANNELS_OFFSET + slot * CPRD_CHANNEL_SIZE;
+      const r = await cprdReadWithFallback(writer, acc,
+        fileOffset, CPRD_CHANNEL_SIZE,
+        CPRD_AREA_EEPROM, CPRD_AREA_FLASH, `channel-${slot + 1}`);
+      cprdWrite(fileBuf, fileOffset, r.data);
+      if (!r.data) {
+        reportFailure(`channel-${slot + 1}`, fileOffset, CPRD_CHANNEL_SIZE, r.hwAddr, r.triedAreas);
+      } else {
+        stats.channelsRead++;
+      }
+      const pct = activeChannels.length === 0
+        ? 45
+        : Math.round(10 + (35 * (i + 1) / activeChannels.length));
+      onProgress({ phase: 'read', pct, msg: `Reading channels… ${i + 1}/${activeChannels.length}` });
     }
 
+    let zoneBitmap = null;
+    {
+      const r = await cprdReadWithFallback(writer, acc,
+        CPRD_ZONE_BITMAP_OFFSET, CPRD_ZONE_BITMAP_SIZE,
+        zoneArea, zoneFallbackArea, 'zone-bitmap');
+      cprdWrite(fileBuf, CPRD_ZONE_BITMAP_OFFSET, r.data);
+      if (!r.data) {
+        reportFailure('zone-bitmap', CPRD_ZONE_BITMAP_OFFSET, CPRD_ZONE_BITMAP_SIZE, r.hwAddr, r.triedAreas);
+        zoneBitmap = new Uint8Array(CPRD_ZONE_BITMAP_SIZE);
+      } else {
+        zoneBitmap = r.data;
+      }
+    }
+
+    let zoneProbeByte = 0xFF;
+    {
+      const r = await cprdReadWithFallback(writer, acc,
+        CPRD_ZONE_FMT_OFFSET, 1,
+        zoneArea, zoneFallbackArea, 'zone-format-probe');
+      cprdWrite(fileBuf, CPRD_ZONE_FMT_OFFSET, r.data);
+      if (!r.data) {
+        reportFailure('zone-format-probe', CPRD_ZONE_FMT_OFFSET, 1, r.hwAddr, r.triedAreas);
+      } else {
+        zoneProbeByte = r.data[0];
+      }
+    }
+
+    const channelsPerZone = (zoneProbeByte >= 0x05 && zoneProbeByte <= 0xFE) ? 16 : 80;
+    const zoneRefsSize = channelsPerZone * 2;
+    const activeZones = cprdBitIndices(zoneBitmap, CPRD_ZONES_MAX);
+    stats.zonesActive = activeZones.length;
+
+    for (let i = 0; i < activeZones.length; i++) {
+      const slot = activeZones[i];
+      const zoneBase = CPRD_ZONE_LIST_OFFSET + slot * (CPRD_ZONE_NAME_SIZE + zoneRefsSize);
+
+      const nameRead = await cprdReadWithFallback(writer, acc,
+        zoneBase, CPRD_ZONE_NAME_SIZE,
+        zoneArea, zoneFallbackArea, `zone-${slot + 1}-name`);
+      cprdWrite(fileBuf, zoneBase, nameRead.data);
+      if (!nameRead.data) {
+        reportFailure(`zone-${slot + 1}-name`, zoneBase, CPRD_ZONE_NAME_SIZE, nameRead.hwAddr, nameRead.triedAreas);
+      }
+
+      const refsRead = await cprdReadWithFallback(writer, acc,
+        zoneBase + CPRD_ZONE_NAME_SIZE, zoneRefsSize,
+        zoneArea, zoneFallbackArea, `zone-${slot + 1}-refs`);
+      cprdWrite(fileBuf, zoneBase + CPRD_ZONE_NAME_SIZE, refsRead.data);
+      if (!refsRead.data) {
+        reportFailure(`zone-${slot + 1}-refs`, zoneBase + CPRD_ZONE_NAME_SIZE, zoneRefsSize, refsRead.hwAddr, refsRead.triedAreas);
+      }
+
+      if (nameRead.data || refsRead.data) stats.zonesRead++;
+      const pct = activeZones.length === 0
+        ? 70
+        : Math.round(45 + (25 * (i + 1) / activeZones.length));
+      onProgress({ phase: 'read', pct, msg: `Reading zones… ${i + 1}/${activeZones.length}` });
+    }
+
+    onProgress({ phase: 'read', pct: 70, msg: 'Reading contacts…' });
+
+    for (let i = 0; i < CPRD_CONTACTS_MAX; i++) {
+      const fileOffset = CPRD_CONTACTS_OFFSET + i * CPRD_CONTACT_SIZE;
+      const r = await cprdReadWithFallback(writer, acc,
+        fileOffset, CPRD_CONTACT_SIZE,
+        CPRD_AREA_FLASH, null, `contact-${i + 1}`);
+
+      if (!r.data) {
+        reportFailure(`contact-${i + 1}`, fileOffset, CPRD_CONTACT_SIZE, r.hwAddr, r.triedAreas);
+        stats.contactsStoppedAt = i + 1;
+        break;
+      }
+
+      cprdWrite(fileBuf, fileOffset, r.data);
+      if (r.data[0] === 0xFF) {
+        stats.contactsStoppedAt = i + 1;
+        break;
+      }
+
+      stats.contactsRead++;
+      const pct = Math.round(70 + (25 * Math.min(i + 1, 128) / 128));
+      onProgress({ phase: 'read', pct, msg: `Reading contacts… ${i + 1}` });
+    }
+
+    onProgress({ phase: 'read', pct: 100, msg: 'Finalising codeplug…' });
+    cprdLogReadDebug(fileBuf, failures, stats);
     return fileBuf.buffer;
 
   } finally {
