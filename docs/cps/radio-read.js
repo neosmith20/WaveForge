@@ -753,24 +753,44 @@ async function cprdRequest(writer, acc, area, address, length, interReadDelayMs)
   await cprdWriteBytes(writer, req, `read area=${area} addr=0x${address.toString(16).toUpperCase().padStart(5, '0')} len=0x${length.toString(16).toUpperCase()}`);
   const addrHex = `0x${address.toString(16).toUpperCase().padStart(5, '0')}`;
   try {
-    const lenBytes = await acc.readExact(2, {
+    const firstByte = await acc.readExact(1, {
       timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-      timeoutLabel: `read length prefix ${addrHex}`,
+      timeoutLabel: `read first byte ${addrHex}`,
     });
+    let framing = 'raw-length-prefixed';
+    let headerBytes = firstByte;
+    let lenBytes = null;
+
+    if (firstByte[0] === CPRD_READ_BYTE) {
+      framing = 'R-framed';
+      lenBytes = await acc.readExact(2, {
+        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+        timeoutLabel: `read R-framed length prefix ${addrHex}`,
+      });
+      headerBytes = cprdConcatBytes(firstByte, lenBytes);
+    } else {
+      const lenTail = await acc.readExact(1, {
+        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+        timeoutLabel: `read raw length byte 2 ${addrHex}`,
+      });
+      lenBytes = cprdConcatBytes(firstByte, lenTail);
+      headerBytes = lenBytes;
+    }
+
     const respLen = (lenBytes[0] << 8) | lenBytes[1];
     if (respLen !== length) {
-      cprdLogReadResponseDiagnostics(lenBytes, address, length, `read response header mismatch addr=${addrHex}`);
+      cprdLogReadResponseDiagnostics(headerBytes, address, length, `read response header mismatch addr=${addrHex}`);
       throw new Error(
-        `Read length prefix mismatch at area=${area} addr=${addrHex}. ` +
+        `Read length prefix mismatch at area=${area} addr=${addrHex} (${framing}). ` +
         `Expected 2-byte BE length ${length}, received ${respLen}.`
       );
     }
     const payload = await acc.readExact(respLen, {
       timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-      timeoutLabel: `read payload ${addrHex}`,
+      timeoutLabel: `read ${framing} payload ${addrHex}`,
     });
     cprdLogReadResponseDiagnostics(
-      cprdConcatBytes(lenBytes, payload),
+      cprdConcatBytes(headerBytes, payload),
       address,
       length,
       `read response complete addr=${addrHex}`
