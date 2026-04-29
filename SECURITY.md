@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-This project is actively maintained. Only the latest version receives security updates.
+ClearDMR is actively maintained. Only the latest version receives security updates.
 
 | Version | Supported |
 | ------- | --------- |
@@ -19,7 +19,7 @@ If you discover a security vulnerability, please report it responsibly.
 
 Instead, use GitHub’s **Private Vulnerability Reporting** feature:
 
-* Navigate to the **Security** tab of this repository
+* Go to the **Security** tab of this repository
 * Click **"Report a vulnerability"**
 * Submit the report with as much detail as possible
 
@@ -28,13 +28,25 @@ Please include:
 * A clear description of the issue
 * Steps to reproduce the vulnerability
 * Potential impact
-* Proof-of-concept or screenshots (if applicable)
+* Proof-of-concept, logs, or screenshots (if applicable)
+
+---
+
+## Scope
+
+Security reports may include (but are not limited to):
+
+* Issues in firmware behavior that could cause unsafe operation
+* Web CPS vulnerabilities (e.g., data handling, injection risks, browser API misuse)
+* WebUSB / Web Serial interaction risks
+* Improper validation of radio data (codeplug parsing, memory handling)
+* Any issue that could result in data corruption, unauthorized access, or unsafe radio operation
 
 ---
 
 ## Response Expectations
 
-This project is maintained by a single developer, so response times may vary.
+This project is currently maintained by a single developer, so response times may vary.
 
 * Initial response target: **within a few days**
 * Valid issues will be investigated and addressed as soon as possible
@@ -43,12 +55,21 @@ This project is maintained by a single developer, so response times may vary.
 
 ## Disclosure Policy
 
-* Please allow time for the issue to be investigated and resolved before public disclosure
+* Please allow reasonable time for the issue to be investigated and resolved before public disclosure
 * Once resolved, details may be shared to improve awareness and security
+
+---
+
+## Important Notes
+
+* ClearDMR is provided for **amateur radio and research use only**
+* **Commercial use is strictly prohibited** under the original OpenGD77 license
+* Users are responsible for operating within their local laws and regulations
 
 ---
 
 ## Acknowledgements
 
-Responsible disclosure is appreciated. Contributors who report valid vulnerabilities may be credited (if desired).
+Responsible disclosure is greatly appreciated.
 
+Contributors who report valid vulnerabilities may be credited (if desired).
