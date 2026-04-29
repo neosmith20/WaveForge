@@ -231,16 +231,16 @@ async function cpwrWriteCodeplug(arrayBuffer, onProgress, options = {}) {
 
   const src = new Uint8Array(arrayBuffer);
 
-  let port = null, writer = null, acc = null;
+  let session = null;
   let taskMode = null;
 
   try {
-    port = await navigator.serial.requestPort({ filters: CPWR_SERIAL_FILTERS });
-    await port.open({ baudRate: 115200 });
+    session = await cprdOpenSerialSession(CPWR_SERIAL_FILTERS, 'cpwrWriteCodeplug', { claimIO: false });
+    const { port } = session;
     // Drain any stale bytes from the OS buffer before starting write commands.
     await cpwrDrainBuffer(port);
-    writer = port.writable.getWriter();
-    acc    = new SerialAccumulator(port.readable.getReader());
+    cprdClaimSerialSessionIO(session);
+    const { writer, acc } = session;
     const radioInfo = await cprdReadRadioInfo(writer, acc);
     if (!radioInfo.isSTM32) {
       throw new Error(`Unsupported radio type ${radioInfo.radioType}. This write path is hardened only for STM32-family radios.`);
@@ -280,14 +280,12 @@ async function cpwrWriteCodeplug(arrayBuffer, onProgress, options = {}) {
     return { ok: true, radioInfo };
 
   } finally {
-    if (taskMode === 'write' && writer && acc) {
-      try { await cpwrEndCodeplugWriteTask(writer, acc); } catch (_) {}
+    if (taskMode === 'write' && session?.writer && session?.acc) {
+      try { await cpwrEndCodeplugWriteTask(session.writer, session.acc); } catch (_) {}
     }
-    if (taskMode === 'read' && writer && acc) {
-      try { await cprdEndCodeplugReadTask(writer, acc); } catch (_) {}
+    if (taskMode === 'read' && session?.writer && session?.acc) {
+      try { await cprdEndCodeplugReadTask(session.writer, session.acc); } catch (_) {}
     }
-    if (acc)    { try { acc.releaseLock();    } catch (_) {} }
-    if (writer) { try { writer.releaseLock(); } catch (_) {} }
-    if (port)   { try { await port.close();   } catch (_) {} }
+    await cprdCloseSerialSession(session, taskMode ? `write operation aborted during ${taskMode}` : 'write operation completed');
   }
 }

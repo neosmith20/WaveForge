@@ -49,6 +49,123 @@ function cprdDelay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+const CPRD_SERIAL_SESSION_STATE = {
+  port: null,
+  owner: null,
+};
+
+function cprdDescribePort(port) {
+  if (!port) return '(none)';
+  const info = typeof port.getInfo === 'function' ? port.getInfo() : {};
+  const vid = Number.isFinite(info.usbVendorId) ? `0x${info.usbVendorId.toString(16).toUpperCase()}` : '?';
+  const pid = Number.isFinite(info.usbProductId) ? `0x${info.usbProductId.toString(16).toUpperCase()}` : '?';
+  return `${vid}/${pid}`;
+}
+
+function cprdIsPortOpen(port) {
+  return !!(port && port.readable && port.writable);
+}
+
+function cprdNormalizeOpenError(err) {
+  const message = String(err?.message || err || '');
+  if (/Failed to open serial port/i.test(message) || /already open/i.test(message)) {
+    return new Error(
+      'Could not open the selected radio port. The browser or another CPS session may still have it open. ' +
+      'Close any previous radio tab/session, unplug/replug the USB cable if needed, and try again.'
+    );
+  }
+  return err instanceof Error ? err : new Error(message || 'Failed to open serial port.');
+}
+
+async function cprdCloseSerialSession(session, reason = '') {
+  if (!session) return;
+  const tag = session.tag || 'serial';
+  if (session.acc) {
+    try { session.acc.releaseLock(); } catch (_) {}
+    session.acc = null;
+  }
+  if (session.writer) {
+    try { session.writer.releaseLock(); } catch (_) {}
+    session.writer = null;
+  }
+  if (session.reader) {
+    try { session.reader.releaseLock(); } catch (_) {}
+    session.reader = null;
+  }
+  if (session.port) {
+    console.info(`[CPRD] port close requested (${tag})${reason ? `: ${reason}` : ''}`, {
+      port: cprdDescribePort(session.port),
+    });
+    try { await session.port.close(); } catch (_) {}
+  }
+  if (CPRD_SERIAL_SESSION_STATE.port === session.port) {
+    CPRD_SERIAL_SESSION_STATE.port = null;
+    CPRD_SERIAL_SESSION_STATE.owner = null;
+  }
+}
+
+function cprdClaimSerialSessionIO(session) {
+  if (!session) throw new Error('Serial session is required.');
+  if (session.reader || session.writer || session.acc) return session;
+  try {
+    session.reader = session.port.readable.getReader();
+    session.writer = session.port.writable.getWriter();
+    session.acc = new SerialAccumulator(session.reader);
+  } catch (err) {
+    try { session.writer?.releaseLock(); } catch (_) {}
+    try { session.reader?.releaseLock(); } catch (_) {}
+    session.writer = null;
+    session.reader = null;
+    session.acc = null;
+    throw cprdNormalizeOpenError(err);
+  }
+  return session;
+}
+
+async function cprdOpenSerialSession(filters, tag, options = {}) {
+  const { claimIO = true } = options;
+  if (CPRD_SERIAL_SESSION_STATE.port) {
+    console.info(`[CPRD] stale port close requested before new open (${tag})`, {
+      owner: CPRD_SERIAL_SESSION_STATE.owner,
+      port: cprdDescribePort(CPRD_SERIAL_SESSION_STATE.port),
+      alreadyOpen: cprdIsPortOpen(CPRD_SERIAL_SESSION_STATE.port),
+    });
+    await cprdCloseSerialSession({
+      port: CPRD_SERIAL_SESSION_STATE.port,
+      writer: null,
+      reader: null,
+      acc: null,
+      tag: CPRD_SERIAL_SESSION_STATE.owner || 'stale-session',
+    }, 'stale session detected');
+  }
+
+  const port = await navigator.serial.requestPort({ filters });
+  console.info(`[CPRD] port selected (${tag})`, {
+    port: cprdDescribePort(port),
+    alreadyOpen: cprdIsPortOpen(port),
+  });
+
+  if (cprdIsPortOpen(port)) {
+    console.info(`[CPRD] port already open (${tag})`, {
+      port: cprdDescribePort(port),
+    });
+  } else {
+    console.info(`[CPRD] port open requested (${tag})`, {
+      port: cprdDescribePort(port),
+    });
+    try {
+      await port.open({ baudRate: 115200 });
+    } catch (err) {
+      throw cprdNormalizeOpenError(err);
+    }
+  }
+
+  const session = { port, reader: null, writer: null, acc: null, tag };
+  CPRD_SERIAL_SESSION_STATE.port = port;
+  CPRD_SERIAL_SESSION_STATE.owner = tag;
+  return claimIO ? cprdClaimSerialSessionIO(session) : session;
+}
+
 function cprdHexBytes(data, count = 8) {
   if (!data) return '(none)';
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
@@ -260,9 +377,7 @@ async function cpreadReadCodeplug(onProgress, options = {}) {
   const out = new Uint8Array(CPRD_CODEPLUG_SIZE);
   out.fill(0xFF);
 
-  let port = null;
-  let writer = null;
-  let acc = null;
+  let session = null;
   let bytesRead = 0;
   let taskStarted = false;
   let chunkSize = Math.min(
@@ -271,10 +386,8 @@ async function cpreadReadCodeplug(onProgress, options = {}) {
   );
 
   try {
-    port = await navigator.serial.requestPort({ filters: CPRD_SERIAL_FILTERS });
-    await port.open({ baudRate: 115200 });
-    writer = port.writable.getWriter();
-    acc = new SerialAccumulator(port.readable.getReader());
+    session = await cprdOpenSerialSession(CPRD_SERIAL_FILTERS, 'cpreadReadCodeplug');
+    const { writer, acc } = session;
 
     const radioInfo = await cprdReadRadioInfo(writer, acc);
     if (!radioInfo.isSTM32) {
@@ -327,12 +440,10 @@ async function cpreadReadCodeplug(onProgress, options = {}) {
       },
     };
   } finally {
-    if (taskStarted && writer && acc) {
-      try { await cprdEndCodeplugReadTask(writer, acc); } catch (_) {}
+    if (taskStarted && session?.writer && session?.acc) {
+      try { await cprdEndCodeplugReadTask(session.writer, session.acc); } catch (_) {}
     }
-    if (acc)    { try { acc.releaseLock(); } catch (_) {} }
-    if (writer) { try { writer.releaseLock(); } catch (_) {} }
-    if (port)   { try { await port.close(); } catch (_) {} }
+    await cprdCloseSerialSession(session, taskStarted ? 'read operation completed' : 'read operation ended early');
   }
 }
 
@@ -353,9 +464,7 @@ async function cprawDumpRange(options, onProgress) {
     throw new Error('Web Serial API not available. Use Chrome or Edge 89+.');
   }
 
-  let port = null;
-  let writer = null;
-  let acc = null;
+  let session = null;
 
   const chunks = [];
   const totalChunks = Math.ceil(length / chunkSize);
@@ -364,10 +473,8 @@ async function cprawDumpRange(options, onProgress) {
   let errorMessage = null;
 
   try {
-    port = await navigator.serial.requestPort({ filters: CPRD_SERIAL_FILTERS });
-    await port.open({ baudRate: 115200 });
-    writer = port.writable.getWriter();
-    acc = new SerialAccumulator(port.readable.getReader());
+    session = await cprdOpenSerialSession(CPRD_SERIAL_FILTERS, 'cprawDumpRange');
+    const { writer, acc } = session;
 
     for (let offset = 0, chunkIndex = 0; offset < length; offset += chunkSize, chunkIndex++) {
       const len = Math.min(chunkSize, length - offset);
@@ -425,8 +532,6 @@ async function cprawDumpRange(options, onProgress) {
       },
     };
   } finally {
-    if (acc)    { try { acc.releaseLock(); } catch (_) {} }
-    if (writer) { try { writer.releaseLock(); } catch (_) {} }
-    if (port)   { try { await port.close(); } catch (_) {} }
+    await cprdCloseSerialSession(session, 'raw dump completed');
   }
 }
