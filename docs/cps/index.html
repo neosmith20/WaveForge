@@ -546,39 +546,52 @@
         </ol>
       </div>
       <div class="write-note">
-        Conservative defaults are recommended. The dump stops on the first failed chunk.
-        If any bytes were collected, a partial dump is still downloaded.
+        Area <strong>1</strong> is raw SPI flash and area <strong>2</strong> is raw EEPROM, matching
+        the firmware USB handler. Presets below use the exact source-backed addresses from
+        <code>firmware/application/source/functions/codeplug.c</code> and
+        <code>firmware/application/source/usb/usb_com.c</code>.
+        The dump stops on the first failed chunk. If any bytes were collected, a partial dump is still downloaded.
       </div>
       <div class="field-group">
         <div class="field-row">
           <span class="field-label">Presets</span>
           <div style="display:flex;flex-wrap:wrap;gap:8px">
             <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
-              data-area="1" data-start="0x00000" data-length="0x10000" data-chunk="0x10" data-delay="15">Flash 0x00000-0x0FFFF</button>
+              data-area="2" data-start="0x00080" data-length="0x0088" data-chunk="0x10" data-delay="15">EEPROM Device + Settings</button>
             <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
-              data-area="1" data-start="0xA0000" data-length="0x10000" data-chunk="0x10" data-delay="15">Flash 0xA0000-0xAFFFF</button>
+              data-area="2" data-start="0x01400" data-length="0x0078" data-chunk="0x10" data-delay="15">EEPROM DTMF Signalling</button>
             <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
-              data-area="2" data-start="0x00000" data-length="0x08000" data-chunk="0x10" data-delay="15">EEPROM 0x00000-0x07FFF</button>
+              data-area="2" data-start="0x02F88" data-length="0x07E0" data-chunk="0x10" data-delay="15">EEPROM DTMF Contacts</button>
             <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
-              data-area="1" data-start="0x08000" data-length="0x3000" data-chunk="0x10" data-delay="15">Zones likely</button>
+              data-area="2" data-start="0x03780" data-length="0x1C10" data-chunk="0x10" data-delay="15">EEPROM Channels 1-128</button>
             <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
-              data-area="1" data-start="0xA7600" data-length="0x7000" data-chunk="0x10" data-delay="15">Contacts likely</button>
+              data-area="2" data-start="0x07500" data-length="0x0100" data-chunk="0x10" data-delay="15">EEPROM Boot + VFO</button>
+            <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
+              data-area="2" data-start="0x08000" data-length="0x2EF0" data-chunk="0x10" data-delay="15">EEPROM Zones</button>
+            <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
+              data-area="1" data-start="0x9B1B0" data-length="0xC470" data-chunk="0x10" data-delay="15">SPI Channels 129-1024</button>
+            <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
+              data-area="1" data-start="0xA7620" data-length="0x6000" data-chunk="0x10" data-delay="15">SPI Contacts</button>
+            <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
+              data-area="1" data-start="0xAD620" data-length="0x004C" data-chunk="0x10" data-delay="15">SPI RX Group Lengths</button>
+            <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
+              data-area="1" data-start="0xAD6A0" data-length="0x17C0" data-chunk="0x10" data-delay="15">SPI RX Groups</button>
           </div>
         </div>
         <div class="field-row">
           <span class="field-label">Area</span>
           <select id="raw-area" class="field-select">
-            <option value="1">1</option>
-            <option value="2">2</option>
+            <option value="1">1 - SPI Flash</option>
+            <option value="2" selected>2 - EEPROM</option>
           </select>
         </div>
         <div class="field-row">
           <span class="field-label">Start Address</span>
-          <input type="text" id="raw-start" class="field-input" value="0x00000" spellcheck="false">
+          <input type="text" id="raw-start" class="field-input" value="0x08000" spellcheck="false">
         </div>
         <div class="field-row">
           <span class="field-label">Length</span>
-          <input type="text" id="raw-length" class="field-input" value="0x10000" spellcheck="false">
+          <input type="text" id="raw-length" class="field-input" value="0x2EF0" spellcheck="false">
         </div>
         <div class="field-row">
           <span class="field-label">Chunk Size</span>
