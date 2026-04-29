@@ -581,24 +581,62 @@ async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
   await cprdObserveIncoming(acc, { label: 'after radio info request' });
 
   try {
-    const status = await acc.readExact(1, {
+    const firstByte = await acc.readExact(1, {
       timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-      timeoutLabel: 'radio info status byte',
-    });
-    if (status[0] !== CPRD_READ_BYTE) {
-      throw new Error(`Radio info read failed. Status=${cprdHexAll(status)}.`);
-    }
-    const lenBytes = await acc.readExact(2, {
-      timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-      timeoutLabel: 'radio info length bytes',
-    });
-    const len = (lenBytes[0] << 8) | lenBytes[1];
-    const payload = await acc.readExact(len, {
-      timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-      timeoutLabel: 'radio info payload',
+      timeoutLabel: 'radio info first byte',
     });
 
-    return cprdParseRadioInfo(payload);
+    let len = 0;
+    let payload = null;
+    let responseFormat = '';
+
+    if (firstByte[0] === CPRD_READ_BYTE) {
+      const lenBytes = await acc.readExact(2, {
+        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+        timeoutLabel: 'radio info length bytes',
+      });
+      len = (lenBytes[0] << 8) | lenBytes[1];
+      payload = await acc.readExact(len, {
+        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+        timeoutLabel: 'radio info payload',
+      });
+      responseFormat = 'R-framed';
+    } else {
+      const lenTail = await acc.readExact(1, {
+        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+        timeoutLabel: 'radio info raw length byte 2',
+      });
+      len = (firstByte[0] << 8) | lenTail[0];
+      if (len <= 0 || len > 64) {
+        throw new Error(`Radio info read failed. Unexpected raw length=0x${len.toString(16).toUpperCase()}.`);
+      }
+      payload = await acc.readExact(len, {
+        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+        timeoutLabel: 'radio info raw payload',
+      });
+      responseFormat = 'raw-length-prefixed';
+    }
+
+    console.log('[CPRD] radio info response', {
+      format: responseFormat,
+      length: len,
+      payloadHex: cprdHexAll(payload),
+    });
+
+    const info = cprdParseRadioInfo(payload);
+    console.log('[CPRD] radio info decoded', {
+      structVersion: info.structVersion,
+      radioType: info.radioType,
+      gitRevision: info.gitRevision,
+      buildDateTime: info.buildDateTime,
+      flashId: `0x${info.flashId.toString(16).toUpperCase()}`,
+      features: `0x${info.features.toString(16).toUpperCase()}`,
+      isSTM32: info.isSTM32,
+      usbBufferSize: info.usbBufferSize,
+      usesOldUsbBufferSize: info.usesOldUsbBufferSize,
+    });
+
+    return info;
   } catch (err) {
     const recentHex = acc.getRecentRxHex(96);
     const message = err instanceof Error ? err.message : String(err);
