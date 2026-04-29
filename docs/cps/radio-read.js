@@ -13,7 +13,8 @@
 // Source-backed raw CPS map for MDUV380 / DM-1701 class radios:
 // - USB area 1 = direct SPI flash reads in usb_com.c
 // - USB area 2 = direct EEPROM reads in usb_com.c
-// - Zone data is EEPROM at 0x8000 / 0x8010 / 0x8030 in codeplug.c
+// - Raw dump proof confirms zone data is direct-mapped EEPROM in area 2 at
+//   0x8000 / 0x8010 / 0x8030, matching codeplug.c
 // - Channels 1..128 are EEPROM at 0x3780..0x538F in codeplug.c
 // - Channels 129..1024 are SPI flash at logical 0x7B1B0..0x8761F plus
 //   FLASH_ADDRESS_OFFSET(0x20000), yielding raw area-1 addresses
