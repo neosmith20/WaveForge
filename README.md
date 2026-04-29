@@ -2,10 +2,9 @@
 
 Open source community firmware for the **Baofeng DM-1701**, **TYT MD-UV380**, and **Retevis RT84** digital radios.
 
-**[cleardmr.com](https://cleardmr.com)** — Web Flasher &bull; Setup Guide &bull; Web CPS
+**[cleardmr.com](https://cleardmr.com)** — Web Flasher • Setup Guide • Web CPS
 
-ClearDMR is a community-driven continuation of the OpenGD77 firmware project,
-modernized and maintained for ongoing use by amateur radio operators worldwide.
+ClearDMR is a community-driven continuation and **fork** of the OpenGD77 firmware project, modernized and maintained for ongoing use by amateur radio operators worldwide.
 
 ---
 
@@ -24,11 +23,11 @@ strictly prohibited per the original license.**
 
 ## Supported Hardware
 
-| Radio | Variants | Status |
-|-------|----------|--------|
-| Baofeng DM-1701 | Standard, Japan | ✅ Supported |
-| TYT MD-UV380 | Standard, 10W+, Japan | ✅ Supported |
-| Retevis RT84 | Standard, Japan | ✅ Supported |
+| Radio           | Variants              | Status      |
+| --------------- | --------------------- | ----------- |
+| Baofeng DM-1701 | Standard, Japan       | ✅ Supported |
+| TYT MD-UV380    | Standard, 10W+, Japan | ✅ Supported |
+| Retevis RT84    | Standard, Japan       | ✅ Supported |
 
 All variants share the same STM32F405 processor and are flashed using the
 [Web Flasher](https://cleardmr.com).
@@ -41,20 +40,23 @@ All variants share the same STM32F405 processor and are flashed using the
 
 ### Completed
 
-- ✅ CMake build system — all 8 firmware variants building cleanly
-- ✅ GitHub Actions CI/CD with automatic releases
-- ✅ Web flasher live at [cleardmr.com](https://cleardmr.com)
-- ✅ Baofeng DM-1701, TYT MD-UV380, and Retevis RT84 support
+* ✅ CMake build system — all 8 firmware variants building cleanly
+* ✅ GitHub Actions CI/CD with automatic releases
+* ✅ Web flasher live at [cleardmr.com](https://cleardmr.com)
+* ✅ Baofeng DM-1701, TYT MD-UV380, and Retevis RT84 support
 
 ### In Progress
 
-- 🔄 Web-based CPS (codeplug editor) at [cleardmr.com/cps](https://cleardmr.com/cps)
+* 🔄 Web-based CPS (codeplug editor) at [cleardmr.com/cps](https://cleardmr.com/cps)
+
+  * Browser-based radio read via Web Serial
+  * Live codeplug interaction without desktop software
 
 ### Roadmap
 
-- 📋 FreeRTOS update
-- 📋 STM32 HAL driver updates
-- 📋 Additional radio support
+* 📋 FreeRTOS update
+* 📋 STM32 HAL driver updates
+* 📋 Additional radio support
 
 ---
 
@@ -65,7 +67,7 @@ no software to install, works on Windows, macOS, and Linux.
 
 **[cleardmr.com](https://cleardmr.com)**
 
-Requires Chrome 89+ or Edge 89+ (WebUSB). Windows users need a one-time
+Requires Chrome 89+ or Edge 89+ (WebUSB/Web Serial). Windows users need a one-time
 WinUSB driver swap via [Zadig](https://zadig.akeo.ie) — full instructions
 are on the site.
 
@@ -73,11 +75,15 @@ are on the site.
 
 ## Background
 
-ClearDMR is based on the final release of the
+ClearDMR is a community-driven continuation and fork of the
 [OpenGD77](https://www.opengd77.com) firmware (September 2024),
 originally developed by Roger Clark VK3KYY and contributors.
+
 OpenGD77 entered archive/read-only status in 2026. ClearDMR exists
 to carry that work forward for the community.
+
+ClearDMR is an independent project and is not affiliated with or
+endorsed by the original OpenGD77 developers.
 
 All original copyright notices are preserved in accordance with the
 OpenGD77 license terms.
@@ -97,7 +103,7 @@ discuss approach first.
 
 ## License
 
-ClearDMR is released under the same terms as the original OpenGD77
-firmware. See [LICENSE](LICENSE) for full details.
+ClearDMR is a derivative work of the OpenGD77 firmware and is distributed
+under the same license terms. See [LICENSE](LICENSE) for full details.
 
 **Non-commercial use only.**
