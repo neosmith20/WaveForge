@@ -99,7 +99,7 @@ async function cprdCloseSerialSession(session, reason = '') {
   if (!session) return;
   const tag = session.tag || 'serial';
   if (session.acc) {
-    try { session.acc.releaseLock(); } catch (_) {}
+    session.acc.resetState({ label: `port close ${tag}`, clearRecent: true, logDrop: true });
     session.acc = null;
   }
   if (session.writer) {
@@ -107,6 +107,7 @@ async function cprdCloseSerialSession(session, reason = '') {
     session.writer = null;
   }
   if (session.reader) {
+    try { await session.reader.cancel(); } catch (_) {}
     try { session.reader.releaseLock(); } catch (_) {}
     session.reader = null;
   }
@@ -354,6 +355,21 @@ class SerialAccumulator {
     this._pending = new Uint8Array(0);
   }
 
+  resetState(options = {}) {
+    const {
+      label = 'reset',
+      clearRecent = true,
+      logDrop = false,
+    } = options;
+    if (logDrop && this._pending.length > 0) {
+      cprdLogRaw('DROP', this._pending, `${label} pending reset`);
+    }
+    this._pending = new Uint8Array(0);
+    if (clearRecent) {
+      this._recentRxChunks = [];
+    }
+  }
+
   async readSome(options = {}) {
     const { timeoutMs = 0, timeoutLabel = '', suppressTimeoutLog = false } = options;
     if (this._pending.length > 0) {
@@ -412,6 +428,14 @@ class SerialAccumulator {
     return cprdHexAll(Uint8Array.from(slice));
   }
 
+  getPendingLength() {
+    return this._pending.length;
+  }
+
+  getRecentRxByteCount() {
+    return this._recentRxChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  }
+
   _rememberRxChunk(chunk) {
     const copy = new Uint8Array(chunk);
     this._recentRxChunks.push(copy);
@@ -450,6 +474,7 @@ async function cprdObserveIncoming(acc, options = {}) {
   const {
     idleMs = CPRD_DRAIN_IDLE_MS,
     label = 'observe',
+    preserve = false,
   } = options;
 
   const chunks = [];
@@ -466,16 +491,18 @@ async function cprdObserveIncoming(acc, options = {}) {
 
   if (chunks.length > 0) {
     const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-    const merged = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-      merged.set(chunk, offset);
-      offset += chunk.length;
+    if (preserve) {
+      const merged = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        merged.set(chunk, offset);
+        offset += chunk.length;
+      }
+      acc.prependPending(merged);
     }
-    acc.prependPending(merged);
-    console.log('[CPRD] observe complete', { label, chunks: chunks.length, bytes: total, preserved: true });
+    console.log('[CPRD] observe complete', { label, chunks: chunks.length, bytes: total, preserved: preserve });
   } else {
-    console.log('[CPRD] observe complete', { label, chunks: 0, bytes: 0, preserved: true });
+    console.log('[CPRD] observe complete', { label, chunks: 0, bytes: 0, preserved: preserve });
   }
 }
 
@@ -651,16 +678,16 @@ async function cprdPrimeRadioConnection(writer, acc, { stealth = false } = {}) {
 
   await cprdWriteBytes(writer, new Uint8Array([CPRD_CMD_BYTE, initByte]), `init 0x${initByte.toString(16).toUpperCase().padStart(2, '0')}`);
   await cprdDelay(CPRD_INIT_SETTLE_MS);
-  await cprdObserveIncoming(acc, { label: 'after C 00' });
+  await cprdClearInputBuffer(acc, { label: 'after C 00' });
 }
 
 async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
+  void stealth;
   const req = new Uint8Array(8);
   req[0] = CPRD_READ_BYTE;
   req[1] = CPRD_MODE_READ_RADIO_INFO;
   console.log('[CPRD] radio info request bytes', { hex: cprdHexAll(req) });
   await cprdWriteBytes(writer, req, 'radio info request');
-  await cprdObserveIncoming(acc, { label: 'after radio info request' });
 
   try {
     const firstByte = await acc.readExact(1, {
@@ -717,6 +744,14 @@ async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
       usbBufferSize: info.usbBufferSize,
       usesOldUsbBufferSize: info.usesOldUsbBufferSize,
     });
+
+    if (acc.getPendingLength() > 0) {
+      console.log('[CPRD] clearing residual radio info bytes', {
+        pendingBytes: acc.getPendingLength(),
+      });
+      acc.clearPending();
+    }
+    await cprdClearInputBuffer(acc, { label: 'after radio info decode' });
 
     return info;
   } catch (err) {
@@ -855,6 +890,13 @@ async function cpreadReadCodeplug(onProgress, options = {}) {
     session = await cprdOpenSerialSession(CPRD_SERIAL_FILTERS, 'cpreadReadCodeplug');
     session.writer.__cprdSession = session;
     const { writer, acc } = session;
+
+    await cprdClearInputBuffer(acc, { label: 'cpread session start' });
+    acc.resetState({ label: 'cpread session start', clearRecent: true, logDrop: false });
+    console.log('[CPRD] read session reset', {
+      rxBufferLength: acc.getPendingLength(),
+      recentRxBytes: acc.getRecentRxByteCount(),
+    });
 
     await cprdPrimeRadioConnection(writer, acc);
     const radioInfo = await cprdReadRadioInfo(writer, acc);
