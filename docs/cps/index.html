@@ -55,6 +55,7 @@
       <button class="btn-sm btn-sm-read" id="read-btn" type="button">Raw Range Dump</button>
       <button class="btn-sm btn-sm-primary" id="save-btn" type="button" disabled>Save .cdmr</button>
       <button class="btn-sm btn-sm-write" id="write-btn" type="button" disabled>Write to Radio</button>
+      <span id="radio-read-version" style="margin-left:8px;font:12px monospace;color:#666"></span>
     </div>
   </div>
 
@@ -552,8 +553,6 @@
         <code>firmware/application/source/usb/usb_com.c</code>.
         Raw dump proof now confirms the zone block is direct-mapped in EEPROM at
         <code>area=2 start=0x08000</code>.
-        EEPROM reads are automatically split into smaller tail requests near fragile
-        <code>...F0</code>, <code>...F8</code>, and page-end boundaries.
         The dump stops on the first failed chunk. If any bytes were collected, a partial dump is still downloaded.
       </div>
       <div class="field-group">
@@ -727,7 +726,7 @@
     </div>
   </dialog>
 
-  <script src="radio-read.js"></script>
+  <script src="radio-read.js?v=20260428-simple-v1"></script>
   <script src="radio-write.js"></script>
   <script src="cps.js"></script>
   <script>
