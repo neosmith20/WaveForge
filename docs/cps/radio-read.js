@@ -216,6 +216,48 @@ function cprdHexBytes(data, count = 8) {
   return Array.from(bytes.subarray(0, count), b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
 }
 
+function cprdConcatBytes(...parts) {
+  const filtered = parts.filter(part => part && part.length > 0);
+  const total = filtered.reduce((sum, part) => sum + part.length, 0);
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const part of filtered) {
+    merged.set(part, offset);
+    offset += part.length;
+  }
+  return merged;
+}
+
+function cprdLogReadResponseDiagnostics(raw, address, requestedLength, label = 'read response') {
+  const len16be = raw.length >= 2 ? ((raw[0] << 8) | raw[1]) : null;
+  const len16le = raw.length >= 2 ? (raw[0] | (raw[1] << 8)) : null;
+  const word32be = raw.length >= 4
+    ? ((((raw[0] << 24) >>> 0) | (raw[1] << 16) | (raw[2] << 8) | raw[3]) >>> 0)
+    : null;
+  const word32le = raw.length >= 4
+    ? ((raw[0] | (raw[1] << 8) | (raw[2] << 16) | ((raw[3] << 24) >>> 0)) >>> 0)
+    : null;
+
+  console.log(`[CPRD] ${label}`, {
+    rxTotalLength: raw.length,
+    first32: cprdHexAll(raw.subarray(0, 32)),
+    len16be,
+    len16le,
+    len16beMatchesRequested: len16be === requestedLength,
+    len16leMatchesRequested: len16le === requestedLength,
+    word32be: word32be == null ? null : `0x${word32be.toString(16).toUpperCase()}`,
+    word32le: word32le == null ? null : `0x${word32le.toString(16).toUpperCase()}`,
+    word32beMatchesRequested: word32be === requestedLength,
+    word32leMatchesRequested: word32le === requestedLength,
+    word32beMatchesAddress: word32be === address,
+    word32leMatchesAddress: word32le === address,
+    candidateLenStrip0: Math.max(0, raw.length),
+    candidateLenStrip2: Math.max(0, raw.length - 2),
+    candidateLenStrip4: Math.max(0, raw.length - 4),
+    candidateLenStrip8: Math.max(0, raw.length - 8),
+  });
+}
+
 async function cprdWriteBytes(writer, bytes, label = '') {
   cprdLogRaw('TX', bytes, label);
   await writer.write(bytes);
@@ -670,20 +712,75 @@ async function cprdRequest(writer, acc, area, address, length, interReadDelayMs)
   req[7] =  length          & 0xFF;
   await cprdWriteBytes(writer, req, `read area=${area} addr=0x${address.toString(16).toUpperCase().padStart(5, '0')} len=0x${length.toString(16).toUpperCase()}`);
 
-  const status = await acc.readExact(1, {
+  const firstChunk = await acc.readSome({
     timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-    timeoutLabel: `read status 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
+    timeoutLabel: `read response 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
   });
-  if (status[0] !== 0x52) return null;
-  const lenBytes = await acc.readExact(2, {
-    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-    timeoutLabel: `read length 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
+  if (!firstChunk || firstChunk.length === 0) return null;
+
+  let raw = firstChunk;
+  while (true) {
+    const extraChunk = await acc.readSome({
+      timeoutMs: CPRD_DRAIN_IDLE_MS,
+      timeoutLabel: `read extra 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
+      suppressTimeoutLog: true,
+    });
+    if (!extraChunk || extraChunk.length === 0) break;
+    raw = cprdConcatBytes(raw, extraChunk);
+  }
+
+  cprdLogReadResponseDiagnostics(raw, address, length, `read response diagnostics addr=0x${address.toString(16).toUpperCase().padStart(5, '0')}`);
+
+  if (raw[0] === CPRD_READ_BYTE) {
+    if (raw.length < 3) {
+      const extra = await acc.readExact(3 - raw.length, {
+        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+        timeoutLabel: `read framed header completion 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
+      });
+      raw = cprdConcatBytes(raw, extra);
+    }
+
+    const respLen = (raw[1] << 8) | raw[2];
+    const totalNeeded = 3 + respLen;
+    if (raw.length < totalNeeded) {
+      const extra = await acc.readExact(totalNeeded - raw.length, {
+        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+        timeoutLabel: `read framed payload completion 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
+      });
+      raw = cprdConcatBytes(raw, extra);
+      cprdLogReadResponseDiagnostics(raw, address, length, `read response complete addr=0x${address.toString(16).toUpperCase().padStart(5, '0')}`);
+    }
+    return raw.subarray(3, 3 + respLen);
+  }
+
+  if (raw.length >= 2) {
+    const len16be = (raw[0] << 8) | raw[1];
+    const len16le = raw[0] | (raw[1] << 8);
+    if (len16be === length || len16le === length) {
+      const prefixLen = 2;
+      const totalNeeded = prefixLen + length;
+      if (raw.length < totalNeeded) {
+        const extra = await acc.readExact(totalNeeded - raw.length, {
+          timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+          timeoutLabel: `read raw payload completion 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
+        });
+        raw = cprdConcatBytes(raw, extra);
+        cprdLogReadResponseDiagnostics(raw, address, length, `read response complete addr=0x${address.toString(16).toUpperCase().padStart(5, '0')}`);
+      }
+      return raw.subarray(prefixLen, prefixLen + length);
+    }
+  }
+
+  console.warn('[CPRD] unrecognized read response framing; storing raw bytes', {
+    address: `0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
+    requestedLength: length,
+    rawLength: raw.length,
   });
-  const respLen = (lenBytes[0] << 8) | lenBytes[1];
-  return acc.readExact(respLen, {
-    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-    timeoutLabel: `read payload 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
-  });
+
+  const fallback = new Uint8Array(length);
+  fallback.fill(0xFF);
+  fallback.set(raw.subarray(0, Math.min(length, raw.length)), 0);
+  return fallback;
 }
 
 async function cprdReadChunk(writer, acc, area, address, length, interReadDelayMs) {
