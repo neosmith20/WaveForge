@@ -48,11 +48,16 @@
       <span class="info-label">File</span>
       <span class="info-value placeholder" id="ib-filename">No file loaded</span>
     </div>
+    <div class="info-sep"></div>
+    <div class="info-field">
+      <span class="info-label">Session</span>
+      <span class="info-value placeholder" id="ib-session-verify">Unverified</span>
+    </div>
     <div class="info-actions">
       <input type="file" id="file-input" accept=".g77,.cdmr" hidden>
       <button class="btn-sm btn-sm-outline" id="new-btn" type="button">New Codeplug</button>
       <button class="btn-sm btn-sm-outline" id="open-btn" type="button">Open .g77 / .cdmr</button>
-      <button class="btn-sm btn-sm-read" id="read-btn" type="button">Raw Range Dump</button>
+      <button class="btn-sm btn-sm-read" id="read-btn" type="button">Read from Radio</button>
       <button class="btn-sm btn-sm-primary" id="save-btn" type="button" disabled>Save .cdmr</button>
       <button class="btn-sm btn-sm-write" id="write-btn" type="button" disabled>Write to Radio</button>
       <span id="radio-read-version" style="margin-left:8px;font:12px monospace;color:#666"></span>
@@ -78,9 +83,9 @@
     <button class="tab-btn" data-tab="contacts" type="button">
       Contacts <span class="tab-count" id="count-contacts">0</span>
     </button>
-    <button class="tab-btn" data-tab="bootscreen" type="button">Boot Screen</button>
+    <button class="tab-btn" data-tab="bootscreen" type="button">Boot Screen <span class="tab-exp">Experimental</span></button>
     <button class="tab-btn" data-tab="bandlimits" type="button">Band Limits</button>
-    <button class="tab-btn" data-tab="bootmelody" type="button">Boot Melody</button>
+    <button class="tab-btn" data-tab="bootmelody" type="button">Boot Melody <span class="tab-exp">Experimental</span></button>
   </div>
 
   <!-- Main area -->
@@ -96,7 +101,7 @@
              or use one of the options below.</p>
           <div class="drop-zone-btns">
             <button class="btn-sm btn-sm-outline" id="drop-open-btn" type="button">Choose file&hellip;</button>
-            <button class="btn-sm btn-sm-read" id="drop-read-btn" type="button">Raw Range Dump&hellip;</button>
+            <button class="btn-sm btn-sm-read" id="drop-read-btn" type="button">Read from Radio&hellip;</button>
           </div>
           <p class="file-types">Supported: .g77 (OpenGD77) &bull; .cdmr (ClearDMR)</p>
         </div>
@@ -198,15 +203,19 @@
         <div class="section-card">
           <div class="section-card-header"><h3>Upload New Boot Image</h3></div>
           <div class="section-card-body">
+            <div class="inline-warn">
+              <strong>Experimental.</strong>
+              Boot image writes are not hardware-verified yet. Use <strong>Verify After Write</strong> and treat results as provisional until round-trip testing passes on real hardware.
+            </div>
             <p class="section-desc">
               Choose an image to show when your radio powers on. It will be scaled to fit
-              the 160&times;128&nbsp;px monochrome display and converted to black and white.
+              the 128&times;64&nbsp;px monochrome display and converted to black and white.
               Adjust the threshold slider to control which tones become black or white.
             </p>
             <div class="boot-upload-row">
               <input type="file" id="bootimg-input" accept="image/*" hidden>
               <button class="btn-sm btn-sm-outline" id="bootimg-pick" type="button">Choose image&hellip;</button>
-              <span class="boot-upload-hint">PNG, JPG, GIF &bull; Will be scaled to 160&times;128&nbsp;px</span>
+              <span class="boot-upload-hint">PNG, JPG, GIF &bull; Will be scaled to 128&times;64&nbsp;px</span>
             </div>
             <div class="boot-threshold-row hidden" id="boot-threshold-row">
               <span class="boot-threshold-label">B&amp;W Threshold</span>
@@ -215,8 +224,8 @@
             </div>
             <div class="boot-canvas-wrap hidden" id="boot-upload-preview">
               <div>
-                <canvas id="boot-upload-canvas" class="boot-canvas" width="160" height="128"></canvas>
-                <p class="boot-canvas-label">Preview &mdash; 160&times;128&nbsp;px shown at 2&times;</p>
+                <canvas id="boot-upload-canvas" class="boot-canvas" width="128" height="64"></canvas>
+                <p class="boot-canvas-label">Preview &mdash; 128&times;64&nbsp;px shown at 2&times;</p>
               </div>
             </div>
             <div class="boot-action-row hidden" id="boot-upload-actions">
@@ -232,8 +241,8 @@
             <p class="section-desc">This is the boot image currently stored in the loaded codeplug file.</p>
             <div class="boot-canvas-wrap">
               <div>
-                <canvas id="boot-current-canvas" class="boot-canvas" width="160" height="128"></canvas>
-                <p class="boot-canvas-label">160&times;128&nbsp;px shown at 2&times;</p>
+                <canvas id="boot-current-canvas" class="boot-canvas" width="128" height="64"></canvas>
+                <p class="boot-canvas-label">128&times;64&nbsp;px shown at 2&times;</p>
               </div>
             </div>
           </div>
@@ -298,12 +307,14 @@
         <div class="section-card">
           <div class="section-card-header"><h3>Boot Melody</h3></div>
           <div class="section-card-body">
+            <div class="inline-warn">
+              <strong>Experimental.</strong>
+              Boot melody writes are not hardware-verified yet. Use <strong>Verify After Write</strong> and confirm reboot behavior on the radio before treating saved results as safe.
+            </div>
             <p class="section-desc">
-              One note per line &mdash; format: <code>note, duration, pause, volume</code><br>
-              <strong>note</strong>: MIDI note number (0&nbsp;= rest, 60&nbsp;= middle&nbsp;C, 69&nbsp;= A4 / 440&nbsp;Hz, 72&nbsp;= C5)
-              &bull; <strong>duration</strong>: ~100&nbsp;ms units, 1–255
-              &bull; <strong>pause</strong>: silence after note, ~50&nbsp;ms units, 0–255
-              &bull; <strong>volume</strong>: 0–15. Maximum 10 notes total.
+              One note per line &mdash; format: <code>note, duration</code><br>
+              <strong>note</strong>: OpenGD77 tone index (0&ndash;63; the firmware clamps to this range)
+              &bull; <strong>duration</strong>: 1&ndash;255 time units. Maximum 255 note pairs plus a required <code>0,0</code> terminator.
             </p>
             <div class="melody-toolbar">
               <select id="melody-examples" class="search-input" style="width:auto;min-width:150px">
@@ -317,7 +328,7 @@
               <button class="btn-sm btn-sm-outline hidden" id="melody-stop" type="button">&#9632; Stop</button>
             </div>
             <textarea id="melody-textarea" class="melody-textarea" rows="10"
-              placeholder="69, 3, 1, 10&#10;72, 3, 1, 10&#10;74, 3, 1, 10&#10;76, 6, 2, 12"></textarea>
+              placeholder="38, 6&#10;0, 2&#10;38, 2&#10;0, 2&#10;38, 6"></textarea>
             <p class="melody-status" id="melody-status"></p>
             <div class="section-actions">
               <button class="btn-sm btn-sm-primary" id="melody-save" type="button" disabled>Save to Codeplug</button>
@@ -527,38 +538,47 @@
     </div>
   </dialog>
 
-  <!-- Raw Range Dump modal -->
+  <!-- Read from Radio modal -->
   <dialog id="read-modal" class="write-modal">
     <div class="modal-header">
-      <h3>Raw Range Dump</h3>
+      <h3>Read from Radio</h3>
       <button class="modal-close" id="read-modal-close" type="button" aria-label="Close">&times;</button>
     </div>
     <div class="modal-body">
       <p class="section-desc">
-        Reads a raw byte range from the radio's CPS address space and downloads it directly.
-        No parsing, no address translation, and no synthetic codeplug reconstruction.
+        Read either a full codeplug using the decompiled OpenGD77 CPS segment map,
+        or a raw byte range for low-level inspection.
       </p>
       <div class="write-dfu-steps">
         <ol>
           <li>Power on the radio normally (do <strong>not</strong> hold PTT&nbsp;+&nbsp;SK1).</li>
           <li>Connect the USB cable to your computer.</li>
-          <li>Choose a preset or enter area/start/length/chunk/delay manually.</li>
-          <li>Click <strong>Connect &amp; Dump</strong> and select your radio from the list.</li>
+          <li>Select <strong>Full Codeplug</strong> or <strong>Raw Range Dump</strong>.</li>
+          <li>If using raw mode, choose a preset or enter area/start/length/chunk/delay manually.</li>
+          <li>Click <strong>Connect &amp; Read</strong> and select your radio from the list.</li>
         </ol>
-      </div>
-      <div class="write-note">
-        Area <strong>1</strong> is raw SPI flash and area <strong>2</strong> is raw EEPROM, matching
-        the firmware USB handler. Presets below use the exact source-backed addresses from
-        <code>firmware/application/source/functions/codeplug.c</code> and
-        <code>firmware/application/source/usb/usb_com.c</code>.
-        Raw dump proof now confirms the zone block is direct-mapped in EEPROM at
-        <code>area=2 start=0x08000</code>.
-        The dump stops on the first failed chunk. If any bytes were collected, a partial dump is still downloaded.
       </div>
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Presets</span>
-          <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <span class="field-label">Read Mode</span>
+          <select id="read-mode" class="field-select">
+            <option value="codeplug" selected>Full Codeplug</option>
+            <option value="raw">Raw Range Dump</option>
+          </select>
+        </div>
+      </div>
+      <div id="raw-settings">
+        <div class="write-note">
+          Area <strong>1</strong> is raw SPI flash and area <strong>2</strong> is raw EEPROM, matching
+          the firmware USB handler. Presets below use the exact source-backed addresses from
+          <code>firmware/application/source/functions/codeplug.c</code> and
+          <code>firmware/application/source/usb/usb_com.c</code>.
+          The dump stops on the first failed chunk. If any bytes were collected, a partial dump is still downloaded.
+        </div>
+        <div class="field-group">
+          <div class="field-row">
+            <span class="field-label">Presets</span>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
             <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
               data-area="2" data-start="0x00000" data-length="0x0200" data-chunk="0x08" data-delay="50">EEPROM 0x00000-0x001FF</button>
             <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
@@ -592,9 +612,10 @@
           <span class="field-label">Chunk Size</span>
           <input type="text" id="raw-chunk" class="field-input" value="0x08" spellcheck="false">
         </div>
-        <div class="field-row">
-          <span class="field-label">Inter-read Delay</span>
-          <input type="number" id="raw-delay" min="0" step="1" class="field-input" value="50">
+          <div class="field-row">
+            <span class="field-label">Inter-read Delay</span>
+            <input type="number" id="raw-delay" min="0" step="1" class="field-input" value="50">
+          </div>
         </div>
       </div>
       <div class="write-progress-wrap" id="read-progress-wrap">
@@ -608,7 +629,7 @@
     <div class="write-footer">
       <div class="modal-spacer"></div>
       <button class="btn-sm btn-sm-outline" id="read-cancel-btn" type="button">Close</button>
-      <button class="btn-sm btn-sm-read" id="read-connect-btn" type="button">Connect &amp; Dump</button>
+      <button class="btn-sm btn-sm-read" id="read-connect-btn" type="button">Connect &amp; Read</button>
     </div>
   </dialog>
 
@@ -637,6 +658,20 @@
         Web Serial requires Chrome, Edge, or another Chromium-based browser.
         Firefox and Safari are not supported.
       </div>
+      <div class="write-note">
+        Boot image and boot melody CustomData writes are still <strong>experimental</strong>
+        until a full hardware round-trip passes. Keep readback verification enabled when testing them.
+      </div>
+      <div class="field-group">
+        <div class="field-row">
+          <span class="field-label">Verify After Write</span>
+          <label style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="write-verify" checked>
+            <span>Re-read written segments and byte-compare</span>
+          </label>
+        </div>
+      </div>
+      <p class="write-status warn" id="write-experimental-note" style="display:none"></p>
       <div class="write-progress-wrap" id="write-progress-wrap">
         <div class="write-progress-bar">
           <div class="write-progress-fill" id="write-progress-fill"></div>
@@ -735,6 +770,7 @@
   // ── State ──────────────────────────────────────────────────────────────────
 
   let codeplug = null;
+  let sessionWriteVerified = false;
 
   // ── DOM refs ──────────────────────────────────────────────────────────────
 
@@ -749,6 +785,7 @@
   const ibCallsign  = document.getElementById('ib-callsign');
   const ibDmrId     = document.getElementById('ib-dmrid');
   const ibFilename  = document.getElementById('ib-filename');
+  const ibSessionVerify = document.getElementById('ib-session-verify');
 
   const tabBtns   = document.querySelectorAll('.tab-btn');
   const tabPanels = {
@@ -817,11 +854,18 @@
       return;
     }
     try {
-      codeplug = await CodeplugParser.fromFile(file);
-      renderAll();
+      loadArrayBuffer(await file.arrayBuffer(), file.name);
     } catch (err) {
       alert('Failed to read codeplug: ' + err.message);
     }
+  }
+
+  function loadArrayBuffer(buffer, filename) {
+    bootPendingBits = null;
+    bootSourcePixels = null;
+    codeplug = new CodeplugParser(buffer);
+    codeplug.filename = filename;
+    renderAll();
   }
 
   // ── Save ──────────────────────────────────────────────────────────────────
@@ -882,6 +926,7 @@
     ibFilename.className   = 'filename-chip';
     saveBtn.disabled       = false;
     writeBtn.disabled      = false;
+    updateSessionVerifyIndicator();
 
     // Warn when the codeplug uses the original 16-channel-per-zone format.
     // This is normal for radios that were never programmed with ClearDMR CPS.
@@ -928,6 +973,12 @@
   function setInfoEditable(span, text) {
     span.textContent = text;
     span.className   = 'info-value editable';
+  }
+
+  function updateSessionVerifyIndicator() {
+    if (!ibSessionVerify) return;
+    ibSessionVerify.textContent = sessionWriteVerified ? 'Round-trip OK' : 'Unverified';
+    ibSessionVerify.className = sessionWriteVerified ? 'info-value' : 'info-value placeholder';
   }
 
   function makeInfoEditable(span, maxLen, numericOnly, onSave) {
@@ -1478,11 +1529,11 @@
 
   // ── Boot Screen ──────────────────────────────────────────────────────────
 
-  const BOOT_W = BOOT_IMAGE_W;   // 160
-  const BOOT_H = BOOT_IMAGE_H;   // 128
+  const BOOT_W = BOOT_IMAGE_W;   // 128
+  const BOOT_H = BOOT_IMAGE_H;   // 64
 
   let bootPendingBits = null;    // Uint8Array (1bpp) awaiting save
-  let bootSourcePixels = null;   // ImageData from loaded file (at 160×128)
+  let bootSourcePixels = null;   // ImageData from loaded file (at 128×64)
 
   document.getElementById('bootimg-pick').addEventListener('click', () =>
     document.getElementById('bootimg-input').click()
@@ -1537,7 +1588,7 @@
         const black = lum < threshold;
         const v     = black ? 0 : 255;
         dst[pi] = dst[pi+1] = dst[pi+2] = v; dst[pi+3] = 255;
-        if (black) bits[y * (BOOT_W >> 3) + (x >> 3)] |= 1 << (7 - (x & 7));
+        if (black) bits[(y >> 3) * BOOT_W + x] |= 1 << (y & 7);
       }
     }
     ctx.putImageData(out, 0, 0);
@@ -1551,7 +1602,7 @@
     let hasContent = false;
     for (let y = 0; y < BOOT_H; y++) {
       for (let x = 0; x < BOOT_W; x++) {
-        const black = !!(bytes[y * (BOOT_W >> 3) + (x >> 3)] & (1 << (7 - (x & 7))));
+        const black = !!(bytes[(y >> 3) * BOOT_W + x] & (1 << (y & 7)));
         const pi    = (y * BOOT_W + x) * 4;
         const v     = black ? 0 : 255;
         dst[pi] = dst[pi+1] = dst[pi+2] = v; dst[pi+3] = 255;
@@ -1586,10 +1637,13 @@
 
   function loadBootSections() {
     if (!codeplug) return;
+    const card = document.getElementById('boot-current-card');
+    card.classList.add('hidden');
+    document.getElementById('boot-current-canvas').getContext('2d').clearRect(0, 0, BOOT_W, BOOT_H);
+    document.getElementById('melody-textarea').value = '';
     // Boot image
     try {
       const bytes = codeplug.bootImage;
-      const card  = document.getElementById('boot-current-card');
       if (bytes && renderBootBytesToCanvas(bytes, document.getElementById('boot-current-canvas'))) {
         card.classList.remove('hidden');
       }
@@ -1601,7 +1655,7 @@
       const entries = codeplug.bootTune;
       if (entries.length) {
         document.getElementById('melody-textarea').value =
-          entries.map(e => `${e.note}, ${e.dur}, ${e.pause}, ${e.vol}`).join('\n');
+          entries.map(e => `${e.note}, ${e.dur}`).join('\n');
       }
     } catch (_) {}
     updateMelodyStatus();
@@ -1610,24 +1664,23 @@
   // ── Boot Melody ───────────────────────────────────────────────────────────
 
   const MELODY_EXAMPLES = {
-    cq: `69, 3, 1, 10
-72, 3, 1, 10
-74, 3, 1, 10
-76, 6, 2, 12`,
-    jingle: `60, 2, 0, 10
-64, 2, 0, 10
-67, 2, 0, 10
-72, 5, 2, 12`,
-    sweep: `48, 1, 0, 8
-52, 1, 0, 8
-55, 1, 0, 8
-60, 1, 0, 10
-64, 1, 0, 10
-67, 1, 0, 10
-72, 4, 1, 12`,
-    roger: `74, 2, 0, 10
-76, 2, 0, 10
-72, 4, 1, 10`,
+    cq: `38, 6
+0, 2
+38, 2
+0, 2
+38, 6`,
+    jingle: `24, 4
+28, 4
+31, 4
+36, 8`,
+    sweep: `12, 2
+18, 2
+24, 2
+30, 2
+36, 4`,
+    roger: `31, 3
+36, 3
+24, 6`,
   };
 
   let audioCtx = null;
@@ -1639,14 +1692,12 @@
       const line = raw.replace(/#.*$/, '').trim();
       if (!line) return;
       const parts = line.split(',').map(s => s.trim());
-      if (parts.length !== 4) { errors.push(`Line ${i+1}: expected 4 values`); return; }
-      const [note, dur, pause, vol] = parts.map(Number);
-      if ([note, dur, pause, vol].some(isNaN)) { errors.push(`Line ${i+1}: all values must be numbers`); return; }
-      if (note < 0 || note > 127)  { errors.push(`Line ${i+1}: note must be 0–127`); return; }
-      if (dur  < 1 || dur  > 255)  { errors.push(`Line ${i+1}: duration must be 1–255`); return; }
-      if (pause < 0 || pause > 255){ errors.push(`Line ${i+1}: pause must be 0–255`); return; }
-      if (vol  < 0 || vol  > 15)   { errors.push(`Line ${i+1}: volume must be 0–15`); return; }
-      entries.push({ note, dur, pause, vol });
+      if (parts.length !== 2) { errors.push(`Line ${i+1}: expected 2 values`); return; }
+      const [note, dur] = parts.map(Number);
+      if ([note, dur].some(isNaN)) { errors.push(`Line ${i+1}: both values must be numbers`); return; }
+      if (note < 0 || note > 63) { errors.push(`Line ${i+1}: note must be 0–63`); return; }
+      if (dur < 1 || dur > 255) { errors.push(`Line ${i+1}: duration must be 1–255`); return; }
+      entries.push({ note, dur });
     });
     return { entries, errors };
   }
@@ -1686,26 +1737,23 @@
     let t = audioCtx.currentTime + 0.05;
     let totalMs = 50;
 
-    entries.slice(0, BOOT_TUNE_MAX).forEach(({ note, dur, pause, vol }) => {
-      const noteSec  = dur   * 0.1;
-      const pauseSec = pause * 0.05;
-      totalMs += (noteSec + pauseSec) * 1000;
-      if (note > 0) {
-        const freq = 440 * Math.pow(2, (note - 69) / 12);
-        const gain = (vol / 15) * 0.2;
-        const osc  = audioCtx.createOscillator();
-        const gn   = audioCtx.createGain();
-        osc.connect(gn); gn.connect(audioCtx.destination);
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(freq, t);
-        gn.gain.setValueAtTime(0, t);
-        gn.gain.linearRampToValueAtTime(gain, t + 0.008);
-        gn.gain.setValueAtTime(gain, t + noteSec - 0.008);
-        gn.gain.linearRampToValueAtTime(0, t + noteSec);
-        osc.start(t); osc.stop(t + noteSec);
-        playingOscs.push(osc);
-      }
-      t += noteSec + pauseSec;
+    entries.slice(0, BOOT_TUNE_MAX).forEach(({ note, dur }) => {
+      const noteSec = dur * 0.035;
+      totalMs += noteSec * 1000;
+      const osc = audioCtx.createOscillator();
+      const gn  = audioCtx.createGain();
+      let freq = Math.round(98 * Math.pow(2, note / 12));
+      if (freq === 98) freq = 37;
+      osc.connect(gn); gn.connect(audioCtx.destination);
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(freq, t);
+      gn.gain.setValueAtTime(0.16, t);
+      gn.gain.setValueAtTime(0.16, t + Math.max(0, noteSec - 0.01));
+      gn.gain.linearRampToValueAtTime(0, t + noteSec);
+      osc.start(t);
+      osc.stop(t + noteSec);
+      playingOscs.push(osc);
+      t += noteSec;
     });
 
     setTimeout(stopMelody, totalMs);
@@ -1830,6 +1878,8 @@
   const writeModalClose = document.getElementById('write-modal-close');
   const writeCancelBtn  = document.getElementById('write-cancel-btn');
   const writeConnectBtn = document.getElementById('write-connect-btn');
+  const writeVerifyEl   = document.getElementById('write-verify');
+  const writeExperimentalNoteEl = document.getElementById('write-experimental-note');
   const writeStatusEl   = document.getElementById('write-status');
   const writeProgressWrap = document.getElementById('write-progress-wrap');
   const writeProgressFill = document.getElementById('write-progress-fill');
@@ -1842,6 +1892,21 @@
     writeProgressFill.style.width  = '0%';
     writeProgressLabel.textContent = '0%';
     writeConnectBtn.disabled = false;
+    try {
+      const hasBootImage = !!(codeplug && codeplug.bootImage);
+      const hasBootTune = !!(codeplug && codeplug.bootTune && codeplug.bootTune.length);
+      if (hasBootImage || hasBootTune) {
+        writeExperimentalNoteEl.style.display = '';
+        writeExperimentalNoteEl.textContent =
+          'This codeplug contains an OpenGD77 boot image and/or boot melody block. Those writes are experimental until hardware round-trip verification passes.';
+      } else {
+        writeExperimentalNoteEl.style.display = 'none';
+        writeExperimentalNoteEl.textContent = '';
+      }
+    } catch (_) {
+      writeExperimentalNoteEl.style.display = 'none';
+      writeExperimentalNoteEl.textContent = '';
+    }
     writeModal.showModal();
   }
 
@@ -1870,10 +1935,21 @@
         writeProgressFill.style.width  = `${pct}%`;
         writeProgressLabel.textContent = `${pct}%`;
         setWriteStatus(msg || '', 'muted');
+      }, {
+        verifyAfterWrite: !!writeVerifyEl.checked,
       });
+      if (writeVerifyEl.checked) {
+        sessionWriteVerified = true;
+        updateSessionVerifyIndicator();
+      }
       writeProgressFill.style.width  = '100%';
       writeProgressLabel.textContent = '100%';
-      setWriteStatus('Done! Power-cycle the radio to apply the new codeplug.', 'ok');
+      setWriteStatus(
+        writeVerifyEl.checked
+          ? 'Done. Readback verification passed. Power-cycle the radio to apply the new codeplug.'
+          : 'Done. Power-cycle the radio to apply the new codeplug.',
+        'ok'
+      );
     } catch (err) {
       if (err.name === 'NotFoundError') {
         setWriteStatus('No device selected.', 'muted');
@@ -1962,7 +2038,7 @@
     setTimeout(() => { blSave.textContent = orig; }, 1500);
   });
 
-  // ── Raw Range Dump ────────────────────────────────────────────────────────
+  // ── Read From Radio ──────────────────────────────────────────────────────
 
   const readBtn          = document.getElementById('read-btn');
   const dropReadBtn      = document.getElementById('drop-read-btn');
@@ -1974,6 +2050,8 @@
   const readProgressWrap = document.getElementById('read-progress-wrap');
   const readProgressFill = document.getElementById('read-progress-fill');
   const readProgressLbl  = document.getElementById('read-progress-label');
+  const readModeEl       = document.getElementById('read-mode');
+  const rawSettingsEl    = document.getElementById('raw-settings');
   const rawAreaEl        = document.getElementById('raw-area');
   const rawStartEl       = document.getElementById('raw-start');
   const rawLengthEl      = document.getElementById('raw-length');
@@ -2018,6 +2096,7 @@
     readProgressFill.style.width  = '0%';
     readProgressLbl.textContent   = '0%';
     readConnectBtn.disabled = false;
+    updateReadModeUi();
     readModal.showModal();
   }
 
@@ -2026,6 +2105,10 @@
   function setReadStatus(msg, cls) {
     readStatusEl.textContent = msg;
     readStatusEl.className   = 'write-status' + (cls ? ' ' + cls : '');
+  }
+
+  function updateReadModeUi() {
+    rawSettingsEl.style.display = readModeEl.value === 'raw' ? '' : 'none';
   }
 
   rawPresetBtns.forEach(btn => btn.addEventListener('click', () => applyRawPreset({
@@ -2040,6 +2123,7 @@
   dropReadBtn.addEventListener('click',    openReadModal);
   readModalClose.addEventListener('click', closeReadModal);
   readCancelBtn.addEventListener('click',  closeReadModal);
+  readModeEl.addEventListener('change',    updateReadModeUi);
   readModal.addEventListener('click', e => { if (e.target === readModal) closeReadModal(); });
 
   readConnectBtn.addEventListener('click', async () => {
@@ -2050,68 +2134,82 @@
     setReadStatus('Connecting…', 'muted');
 
     try {
-      const params = {
-        area: Number(rawAreaEl.value),
-        start: parseHexInput(rawStartEl.value, 'Start address'),
-        length: parseHexInput(rawLengthEl.value, 'Length'),
-        chunkSize: parseHexInput(rawChunkEl.value, 'Chunk size'),
-        interReadDelayMs: Number.parseInt(rawDelayEl.value, 10),
-      };
-      if (!Number.isFinite(params.interReadDelayMs) || params.interReadDelayMs < 0) {
-        throw new Error('Inter-read delay must be 0 or greater.');
-      }
-
-      const result = await cprawDumpRange(params, ({ pct, msg }) => {
-        readProgressFill.style.width  = `${pct}%`;
-        readProgressLbl.textContent   = `${pct}%`;
-        setReadStatus(msg || '', 'muted');
-      });
-
-      const stamp = makeDumpStamp();
-      const areaPart = `area${params.area}`;
-      const startPart = `start${params.start.toString(16).toUpperCase().padStart(5, '0')}`;
-      const lengthPart = `len${params.length.toString(16).toUpperCase()}`;
-      const chunkPart = `chunk${params.chunkSize.toString(16).toUpperCase()}`;
-      const delayPart = `delay${params.interReadDelayMs}`;
-      const baseName = `rawdump_${areaPart}_${startPart}_${lengthPart}_${chunkPart}_${delayPart}_${stamp}`;
-
-      if (result.bytesRead > 0) {
-        downloadBlob(`${baseName}.bin`, new Blob([result.buffer], { type: 'application/octet-stream' }));
-        const metaText = [
-          `area=${params.area}`,
-          `start=0x${params.start.toString(16).toUpperCase().padStart(5, '0')}`,
-          `length=0x${params.length.toString(16).toUpperCase()}`,
-          `chunk=0x${params.chunkSize.toString(16).toUpperCase()}`,
-          `delay_ms=${params.interReadDelayMs}`,
-          `bytes_read=0x${result.bytesRead.toString(16).toUpperCase()}`,
-          `complete=${result.complete ? 'yes' : 'no'}`,
-          result.failedAt
-            ? `failed_at=0x${result.failedAt.address.toString(16).toUpperCase().padStart(5, '0')}`
-            : 'failed_at=none',
-          result.errorMessage ? `error=${result.errorMessage}` : 'error=none',
-        ].join('\n') + '\n';
-        downloadBlob(`${baseName}.txt`, new Blob([metaText], { type: 'text/plain;charset=utf-8' }));
-      }
-
-      readProgressFill.style.width = `${Math.round((result.bytesRead / Math.max(result.requestedLength, 1)) * 100)}%`;
-      readProgressLbl.textContent  = `${Math.round((result.bytesRead / Math.max(result.requestedLength, 1)) * 100)}%`;
-
-      if (result.complete) {
-        setReadStatus(`Saved ${baseName}.bin`, 'ok');
-      } else if (result.bytesRead > 0) {
-        setReadStatus(
-          `Saved partial dump ${baseName}.bin (${result.bytesRead}/${result.requestedLength} bytes). ` +
-          `${result.errorMessage || 'Stopped on first failed chunk.'}`,
-          'warn'
-        );
+      if (readModeEl.value === 'codeplug') {
+        const stamp = makeDumpStamp();
+        const filename = `radio_${stamp}.g77`;
+        const result = await cpreadReadCodeplug(({ pct, msg }) => {
+          readProgressFill.style.width = `${pct}%`;
+          readProgressLbl.textContent  = `${pct}%`;
+          setReadStatus(msg || '', 'muted');
+        });
+        loadArrayBuffer(result.buffer, filename);
+        readProgressFill.style.width = '100%';
+        readProgressLbl.textContent  = '100%';
+        setReadStatus(`Loaded ${filename} from radio.`, 'ok');
       } else {
-        setReadStatus(result.errorMessage || 'Dump failed before any bytes were read.', 'err');
+        const params = {
+          area: Number(rawAreaEl.value),
+          start: parseHexInput(rawStartEl.value, 'Start address'),
+          length: parseHexInput(rawLengthEl.value, 'Length'),
+          chunkSize: parseHexInput(rawChunkEl.value, 'Chunk size'),
+          interReadDelayMs: Number.parseInt(rawDelayEl.value, 10),
+        };
+        if (!Number.isFinite(params.interReadDelayMs) || params.interReadDelayMs < 0) {
+          throw new Error('Inter-read delay must be 0 or greater.');
+        }
+
+        const result = await cprawDumpRange(params, ({ pct, msg }) => {
+          readProgressFill.style.width  = `${pct}%`;
+          readProgressLbl.textContent   = `${pct}%`;
+          setReadStatus(msg || '', 'muted');
+        });
+
+        const stamp = makeDumpStamp();
+        const areaPart = `area${params.area}`;
+        const startPart = `start${params.start.toString(16).toUpperCase().padStart(5, '0')}`;
+        const lengthPart = `len${params.length.toString(16).toUpperCase()}`;
+        const chunkPart = `chunk${params.chunkSize.toString(16).toUpperCase()}`;
+        const delayPart = `delay${params.interReadDelayMs}`;
+        const baseName = `rawdump_${areaPart}_${startPart}_${lengthPart}_${chunkPart}_${delayPart}_${stamp}`;
+
+        if (result.bytesRead > 0) {
+          downloadBlob(`${baseName}.bin`, new Blob([result.buffer], { type: 'application/octet-stream' }));
+          const metaText = [
+            `area=${params.area}`,
+            `start=0x${params.start.toString(16).toUpperCase().padStart(5, '0')}`,
+            `length=0x${params.length.toString(16).toUpperCase()}`,
+            `chunk=0x${params.chunkSize.toString(16).toUpperCase()}`,
+            `delay_ms=${params.interReadDelayMs}`,
+            `bytes_read=0x${result.bytesRead.toString(16).toUpperCase()}`,
+            `complete=${result.complete ? 'yes' : 'no'}`,
+            result.failedAt
+              ? `failed_at=0x${result.failedAt.address.toString(16).toUpperCase().padStart(5, '0')}`
+              : 'failed_at=none',
+            result.errorMessage ? `error=${result.errorMessage}` : 'error=none',
+          ].join('\n') + '\n';
+          downloadBlob(`${baseName}.txt`, new Blob([metaText], { type: 'text/plain;charset=utf-8' }));
+        }
+
+        readProgressFill.style.width = `${Math.round((result.bytesRead / Math.max(result.requestedLength, 1)) * 100)}%`;
+        readProgressLbl.textContent  = `${Math.round((result.bytesRead / Math.max(result.requestedLength, 1)) * 100)}%`;
+
+        if (result.complete) {
+          setReadStatus(`Saved ${baseName}.bin`, 'ok');
+        } else if (result.bytesRead > 0) {
+          setReadStatus(
+            `Saved partial dump ${baseName}.bin (${result.bytesRead}/${result.requestedLength} bytes). ` +
+            `${result.errorMessage || 'Stopped on first failed chunk.'}`,
+            'warn'
+          );
+        } else {
+          setReadStatus(result.errorMessage || 'Dump failed before any bytes were read.', 'err');
+        }
       }
     } catch (err) {
       if (err.name === 'NotFoundError') {
         setReadStatus('No device selected.', 'muted');
       } else {
-        setReadStatus(`Dump failed: ${err.message}`, 'err');
+        setReadStatus(`Read failed: ${err.message}`, 'err');
       }
       readConnectBtn.disabled = false;
       return;

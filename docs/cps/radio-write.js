@@ -19,31 +19,38 @@
 //   Response on success: [0x58, subcommand]
 //   Response on error:   ['-']
 //
-// Codeplug file layout (128 KB):
-//   file[0x00000..0x0FFFF]  → EEPROM region  (SPI Flash hw addr = file addr)
-//   file[0x10000..0x1FFFF]  → SPI Flash region (hw addr = file addr + 0x90000)
+// Decompiled OpenGD77 CPS source is the reference model here.
+// For STM32-based radios (MD-UV380 / RT84 / DM-1701 class), the CPS does not
+// write a flat "EEPROM half + flash half" image. It writes five disjoint file
+// segments, all via flash-sector overlay writes:
 //
-// FLASH_ADDRESS_OFFSET = 0x20000 (codeplug.h, MDUV380/RT84/DM1701).
-// SPI Flash hw addr for second region = file offset + FLASH_ADDRESS_OFFSET + 0x70000
-//   = file offset + 0x90000
+//   file 0x00080..0x05FFF -> radio 0x00080..0x05FFF
+//   file 0x06000..0x06049 -> radio 0x06000..0x06049   (LUCZ block)
+//   file 0x07500..0x0AFFF -> radio 0x07500..0x0AFFF
+//   file 0x0B000..0x1EE5F -> radio 0x9B000..0xAEE5F
+//   file 0x1EE60..0x1FFFF -> radio 0x20000..0x2119F   (OpenGD77 custom data)
 //
-// Entirely-0xFF sectors are skipped to avoid overwriting radio settings or
-// calibration data that live in the same SPI Flash address space.
+// That behavior comes directly from OpenGD77Form.worker_DoWork(),
+// WriteFlash(), and the STM32 flash-address offset handling in the
+// decompiled OpenGD77 CPS.
 
 const CPWR_SERIAL_FILTERS = [{ usbVendorId: 0x1FC9, usbProductId: 0x0094 }];
 
-const CPWR_CMD_BYTE    = 0x58;  // 'X'
+const CPWR_CMD_BYTE_X  = 0x58;  // 'X'
+const CPWR_CMD_BYTE_W  = 0x57;  // 'W'
 const CPWR_SUB_PREPARE = 0x01;
 const CPWR_SUB_SEND    = 0x02;
 const CPWR_SUB_WRITE   = 0x03;
 const CPWR_SECTOR_SIZE = 4096;
-const CPWR_CHUNK       = 1024;  // data bytes per Send Data request (max 2040)
+const CPWR_CHUNK       = 1024;  // modern OpenGD77 CPS uses 1024-byte USB buffers
 const CPWR_FILE_SIZE   = 0x20000;
-const CPWR_HALF        = CPWR_FILE_SIZE >>> 1;   // 64 KB per region
-
-// SPI Flash hw base for the second (SPI Flash) region:
-//   file 0x10000 + FLASH_ADDRESS_OFFSET(0x20000) + 0x70000 = 0xA0000
-const CPWR_FLASH_HW_BASE = 0xA0000;
+const CPWR_CODEPLUG_SEGMENTS = [
+  { fileStart: 0x00080, fileEnd: 0x06000, radioStart: 0x00080, label: 'Codeplug block 1' },
+  { fileStart: 0x06000, fileEnd: 0x0604A, radioStart: 0x06000, label: 'Last used channels' },
+  { fileStart: 0x07500, fileEnd: 0x0B000, radioStart: 0x07500, label: 'Codeplug block 2' },
+  { fileStart: 0x0B000, fileEnd: 0x1EE60, radioStart: 0x9B000, label: 'Extended codeplug' },
+  { fileStart: 0x1EE60, fileEnd: 0x20000, radioStart: 0x20000, label: 'OpenGD77 custom data' },
+];
 
 // SerialAccumulator is defined in radio-read.js (loaded first); shared via global scope.
 
@@ -51,7 +58,7 @@ const CPWR_FLASH_HW_BASE = 0xA0000;
 async function cpwrRequest(writer, acc, bytes, context) {
   await writer.write(bytes);
   const r = await acc.readExact(1);
-  if (r[0] !== CPWR_CMD_BYTE) {
+  if (r[0] !== bytes[0]) {
     const where = context ? ` (${context})` : '';
     throw new Error(
       `Radio returned an error during write${where}. ` +
@@ -63,38 +70,129 @@ async function cpwrRequest(writer, acc, bytes, context) {
   await acc.readExact(1);  // subcommand echo
 }
 
-// Write one 4 KB sector to SPI Flash via Prepare → Send data → Write.
-async function cpwrFlashSector(writer, acc, spiAddr, sectorData) {
-  const sector  = Math.floor(spiAddr / CPWR_SECTOR_SIZE);
-  const addrHex = '0x' + spiAddr.toString(16).toUpperCase().padStart(5, '0');
-
-  // 1. Prepare: radio reads the current sector into its internal buffer.
+async function cpwrPrepareSector(writer, acc, address, writeByte) {
+  const sector = Math.floor(address / CPWR_SECTOR_SIZE);
   await cpwrRequest(writer, acc, new Uint8Array([
-    CPWR_CMD_BYTE, CPWR_SUB_PREPARE,
+    writeByte, CPWR_SUB_PREPARE,
     (sector >>> 16) & 0xFF,
     (sector >>>  8) & 0xFF,
      sector         & 0xFF,
-  ]), `prepare sector ${addrHex}`);
+  ]), `prepare sector 0x${address.toString(16).toUpperCase().padStart(5, '0')}`);
+}
 
-  // 2. Send data in chunks, overlaying our bytes into the buffer.
-  for (let i = 0; i < CPWR_SECTOR_SIZE; i += CPWR_CHUNK) {
-    const len  = Math.min(CPWR_CHUNK, CPWR_SECTOR_SIZE - i);
-    const addr = spiAddr + i;
-    const req  = new Uint8Array(8 + len);
-    req[0] = CPWR_CMD_BYTE; req[1] = CPWR_SUB_SEND;
-    req[2] = (addr >>> 24) & 0xFF;
-    req[3] = (addr >>> 16) & 0xFF;
-    req[4] = (addr >>>  8) & 0xFF;
-    req[5] =  addr         & 0xFF;
-    req[6] = (len  >>>  8) & 0xFF;
-    req[7] =  len          & 0xFF;
-    req.set(sectorData.subarray(i, i + len), 8);
-    await cpwrRequest(writer, acc, req, `send data ${addrHex}+${i}`);
+async function cpwrSendData(writer, acc, address, data, writeByte) {
+  const req = new Uint8Array(8 + data.length);
+  req[0] = writeByte;
+  req[1] = CPWR_SUB_SEND;
+  req[2] = (address >>> 24) & 0xFF;
+  req[3] = (address >>> 16) & 0xFF;
+  req[4] = (address >>>  8) & 0xFF;
+  req[5] =  address         & 0xFF;
+  req[6] = (data.length >>> 8) & 0xFF;
+  req[7] =  data.length         & 0xFF;
+  req.set(data, 8);
+  await cpwrRequest(writer, acc, req, `send data 0x${address.toString(16).toUpperCase().padStart(5, '0')}`);
+}
+
+async function cpwrWriteSector(writer, acc, address, writeByte) {
+  await cpwrRequest(
+    writer,
+    acc,
+    new Uint8Array([writeByte, CPWR_SUB_WRITE]),
+    `erase/write sector 0x${address.toString(16).toUpperCase().padStart(5, '0')}`
+  );
+}
+
+async function cpwrWriteSegment(writer, acc, src, segment, progressState, onProgress, writeByte, chunkSize) {
+  let radioAddr = segment.radioStart >>> 0;
+  let filePos = segment.fileStart >>> 0;
+  const totalLen = (segment.fileEnd - segment.fileStart) >>> 0;
+  let sector = -1;
+
+  while (filePos < segment.fileEnd) {
+    if (sector === -1) {
+      await cpwrPrepareSector(writer, acc, radioAddr, writeByte);
+      sector = Math.floor(radioAddr / CPWR_SECTOR_SIZE);
+    }
+
+    const sectorRemaining = ((sector + 1) * CPWR_SECTOR_SIZE) - radioAddr;
+    const len = Math.min(chunkSize, segment.fileEnd - filePos, sectorRemaining);
+    await cpwrSendData(writer, acc, radioAddr, src.subarray(filePos, filePos + len), writeByte);
+
+    radioAddr += len;
+    filePos += len;
+    progressState.bytesWritten += len;
+    const pct = Math.round((progressState.bytesWritten / progressState.totalBytes) * 100);
+    onProgress({
+      phase: 'write',
+      pct,
+      msg: `Writing ${segment.label} (${filePos - segment.fileStart}/${totalLen} bytes)…`,
+    });
+
+    if (Math.floor(radioAddr / CPWR_SECTOR_SIZE) !== sector) {
+      await cpwrWriteSector(writer, acc, radioAddr - 1, writeByte);
+      sector = -1;
+    }
   }
 
-  // 3. Write: erase the 4 KB sector then program from the buffer.
-  await cpwrRequest(writer, acc, new Uint8Array([CPWR_CMD_BYTE, CPWR_SUB_WRITE]),
-    `erase/write sector ${addrHex}`);
+  if (sector !== -1) {
+    await cpwrWriteSector(writer, acc, radioAddr - 1, writeByte);
+  }
+}
+
+async function cpwrBeginCodeplugWriteTask(writer, acc) {
+  await cprdSendCommand(writer, acc, 1);
+  await cprdSendCommand(writer, acc, 2, { y: 0,  size: 3, alignment: 1, message: 'CPS' });
+  await cprdSendCommand(writer, acc, 2, { y: 16, size: 3, alignment: 1, message: 'Writing' });
+  await cprdSendCommand(writer, acc, 2, { y: 32, size: 3, alignment: 1, message: 'Codeplug' });
+  await cprdSendCommand(writer, acc, 3);
+  await cprdSendCommand(writer, acc, 6, { xOrOption: 4 });
+  await cprdSendCommand(writer, acc, 6, { xOrOption: 2 });
+}
+
+async function cpwrEndCodeplugWriteTask(writer, acc) {
+  await cprdSendCommand(writer, acc, 6, { xOrOption: 0 });
+}
+
+async function cpwrVerifySegments(writer, acc, src, chunkSize, onProgress) {
+  const totalBytes = CPWR_CODEPLUG_SEGMENTS.reduce((sum, segment) => sum + (segment.fileEnd - segment.fileStart), 0);
+  let verified = 0;
+
+  for (const segment of CPWR_CODEPLUG_SEGMENTS) {
+    let filePos = segment.fileStart;
+    let radioAddr = segment.radioStart;
+
+    while (filePos < segment.fileEnd) {
+      const len = Math.min(chunkSize, segment.fileEnd - filePos);
+      const data = await cprdReadChunk(writer, acc, CPRD_MODE_READ_FLASH, radioAddr, len, 0);
+      if (!data || data.length !== len) {
+        throw new Error(`Verification read failed at 0x${radioAddr.toString(16).toUpperCase().padStart(5, '0')}.`);
+      }
+      const expected = src.subarray(filePos, filePos + len);
+      for (let i = 0; i < len; i++) {
+        if (data[i] !== expected[i]) {
+          const fileAddr = filePos + i;
+          const radioMismatch = radioAddr + i;
+          throw new Error(
+            `Verification mismatch at file 0x${fileAddr.toString(16).toUpperCase().padStart(5, '0')} ` +
+            `(radio 0x${radioMismatch.toString(16).toUpperCase().padStart(5, '0')}): ` +
+            `wrote 0x${expected[i].toString(16).toUpperCase().padStart(2, '0')}, ` +
+            `read 0x${data[i].toString(16).toUpperCase().padStart(2, '0')}.`
+          );
+        }
+      }
+
+      filePos += len;
+      radioAddr += len;
+      verified += len;
+      const pct = Math.round((verified / totalBytes) * 100);
+      onProgress?.({
+        phase: 'verify',
+        pct,
+        msg: `Verifying ${segment.label} (${filePos - segment.fileStart}/${segment.fileEnd - segment.fileStart} bytes)…`,
+      });
+    }
+  }
 }
 
 // Drain any bytes left in the OS serial receive buffer from a previous session
@@ -126,7 +224,7 @@ async function cpwrDrainBuffer(port) {
 
 // Write an ArrayBuffer codeplug to the radio via USB CDC.
 // onProgress({ phase: 'write', pct: 0-100, msg: string })
-async function cpwrWriteCodeplug(arrayBuffer, onProgress) {
+async function cpwrWriteCodeplug(arrayBuffer, onProgress, options = {}) {
   if (!navigator.serial) {
     throw new Error('Web Serial API not available. Use Chrome or Edge 89+.');
   }
@@ -134,6 +232,7 @@ async function cpwrWriteCodeplug(arrayBuffer, onProgress) {
   const src = new Uint8Array(arrayBuffer);
 
   let port = null, writer = null, acc = null;
+  let taskMode = null;
 
   try {
     port = await navigator.serial.requestPort({ filters: CPWR_SERIAL_FILTERS });
@@ -142,38 +241,51 @@ async function cpwrWriteCodeplug(arrayBuffer, onProgress) {
     await cpwrDrainBuffer(port);
     writer = port.writable.getWriter();
     acc    = new SerialAccumulator(port.readable.getReader());
+    const radioInfo = await cprdReadRadioInfo(writer, acc);
+    if (!radioInfo.isSTM32) {
+      throw new Error(`Unsupported radio type ${radioInfo.radioType}. This write path is hardened only for STM32-family radios.`);
+    }
+    await cpwrBeginCodeplugWriteTask(writer, acc);
+    taskMode = 'write';
+    const writeByte = radioInfo.isSTM32 ? CPWR_CMD_BYTE_X : CPWR_CMD_BYTE_W;
+    const chunkSize = Math.min(CPWR_CHUNK, radioInfo.usbBufferSize);
 
-    // Collect all non-blank sectors. Skipping entirely-0xFF sectors preserves
-    // radio settings / calibration data stored elsewhere in the same SPI Flash.
-    const regions = [
-      { fileBase: 0x00000,   hwBase: 0x00000,          label: 'EEPROM' },
-      { fileBase: CPWR_HALF, hwBase: CPWR_FLASH_HW_BASE, label: 'SPI Flash' },
-    ];
-    const queue = [];
-    for (const { fileBase, hwBase, label } of regions) {
-      for (let i = 0; i < CPWR_HALF; i += CPWR_SECTOR_SIZE) {
-        const data = src.subarray(fileBase + i, fileBase + i + CPWR_SECTOR_SIZE);
-        if (!data.every(b => b === 0xFF)) {
-          queue.push({ spiAddr: hwBase + i, data, label });
-        }
-      }
+    if (src.length < CPWR_FILE_SIZE) {
+      throw new Error(`Codeplug is ${src.length} bytes — expected ${CPWR_FILE_SIZE}.`);
     }
 
-    const total = queue.length;
-    if (total === 0) throw new Error('Codeplug is blank — nothing to write.');
+    const progressState = {
+      bytesWritten: 0,
+      totalBytes: CPWR_CODEPLUG_SEGMENTS.reduce((sum, segment) => sum + (segment.fileEnd - segment.fileStart), 0),
+    };
+    onProgress({ phase: 'write', pct: 0, msg: 'Writing codeplug segments…' });
 
-    onProgress({ phase: 'write', pct: 0, msg: `Writing ${total} sectors…` });
-
-    for (let i = 0; i < total; i++) {
-      const { spiAddr, data, label } = queue[i];
-      await cpwrFlashSector(writer, acc, spiAddr, data);
-      const pct = Math.round(((i + 1) / total) * 100);
-      onProgress({ phase: 'write', pct, msg: `Writing ${label} sector ${i + 1} of ${total}…` });
+    for (const segment of CPWR_CODEPLUG_SEGMENTS) {
+      await cpwrWriteSegment(writer, acc, src, segment, progressState, onProgress, writeByte, chunkSize);
     }
 
-    return { ok: true };
+    if (options.verifyAfterWrite) {
+      await cpwrEndCodeplugWriteTask(writer, acc);
+      taskMode = null;
+      await cprdBeginCodeplugReadTask(writer, acc);
+      taskMode = 'read';
+      await cpwrVerifySegments(writer, acc, src, chunkSize, onProgress);
+      await cprdEndCodeplugReadTask(writer, acc);
+      taskMode = null;
+    } else {
+      await cpwrEndCodeplugWriteTask(writer, acc);
+      taskMode = null;
+    }
+
+    return { ok: true, radioInfo };
 
   } finally {
+    if (taskMode === 'write' && writer && acc) {
+      try { await cpwrEndCodeplugWriteTask(writer, acc); } catch (_) {}
+    }
+    if (taskMode === 'read' && writer && acc) {
+      try { await cprdEndCodeplugReadTask(writer, acc); } catch (_) {}
+    }
     if (acc)    { try { acc.releaseLock();    } catch (_) {} }
     if (writer) { try { writer.releaseLock(); } catch (_) {} }
     if (port)   { try { await port.close();   } catch (_) {} }

@@ -8,8 +8,6 @@ const ADDR = {
   GENERAL_SETTINGS: 0x00E0,   // radioName[8] + radioId[4]
   CHAN_BITMAP:       0x3780,   // 16 bytes, bits 0..127 = channels 1..128
   CHANNELS:          0x3790,   // 56 bytes each
-  BOOT_IMAGE:        0x6B40,   // 2560 bytes, 160×128 px 1bpp row-major MSB-first (estimated — verify vs firmware)
-  BOOT_TUNE:         0x7518,   // ≤10 × 4-byte entries [note,dur,pause,vol], 0xFF-terminated
   BOOT_LINE1:        0x7540,
   BOOT_LINE2:        0x7550,
   VFO_A:             0x7590,
@@ -19,23 +17,42 @@ const ADDR = {
   CONTACTS:          0x17620,  // 24 bytes each (hw 0x87620 - 0x70000)
   RXG_LEN:           0x1D620,
   RXG_DATA:          0x1D6A0,
+  LAST_USED_CHANNELS: 0x06000,
+  CUSTOM_DATA_START:  0x1EE60,
+  CUSTOM_DATA_END:    0x20000,
 };
 
 const CHANNEL_STRUCT_SIZE  = 56;
 const CONTACT_STRUCT_SIZE  = 24;
 const RXG_LEN_SIZE        = 3;
 const RXG_DATA_SIZE       = 82;
+const LAST_USED_CHANNELS_SIZE = 74;
 
 const CHANNELS_MAX = 128;
 const ZONES_MAX    = 68;
 const CONTACTS_MAX = 1024;
 const RXG_MAX      = 76;
 
-const BOOT_IMAGE_W    = 160;
-const BOOT_IMAGE_H    = 128;
-const BOOT_IMAGE_SIZE = BOOT_IMAGE_W * BOOT_IMAGE_H / 8;  // 2560 bytes
-const BOOT_TUNE_MAX   = 10;
-const BOOT_TUNE_ENTRY = 4;
+const CUSTOM_DATA_MAGIC             = 'OpenGD77';
+const CUSTOM_DATA_HEADER_SIZE       = CUSTOM_DATA_MAGIC.length + 4;
+const CUSTOM_DATA_BLOCK_HEADER_SIZE = 8;
+const CUSTOM_DATA_TYPE = {
+  UNINITIALISED: 0xFF,
+  IMAGE:         0x01,
+  MELODY:        0x02,
+  SATELLITE:     0x03,
+  THEME_DAY:     0x04,
+  THEME_NIGHT:   0x05,
+};
+const CUSTOM_DATA_SIZE = ADDR.CUSTOM_DATA_END - ADDR.CUSTOM_DATA_START;
+const LAST_USED_CHANNELS_MAGIC = 'LUCZ';
+
+const BOOT_IMAGE_W    = 128;
+const BOOT_IMAGE_H    = 64;
+const BOOT_IMAGE_SIZE = BOOT_IMAGE_W * BOOT_IMAGE_H / 8;  // 1024 bytes
+const BOOT_TUNE_MAX   = 255;
+const BOOT_TUNE_ENTRY = 2;
+const BOOT_TUNE_SIZE  = 512;
 
 const CSS_DCS          = 0x8000;
 const CSS_DCS_INVERTED = 0x4000;
@@ -131,6 +148,38 @@ function encodeCss(cssStr) {
 
 function fillFF(view, offset, len) {
   for (let i = 0; i < len; i++) view.setUint8(offset + i, 0xFF);
+}
+
+function fillZero(view, offset, len) {
+  for (let i = 0; i < len; i++) view.setUint8(offset + i, 0x00);
+}
+
+function asciiMatches(bytes, offset, str) {
+  if (offset + str.length > bytes.length) return false;
+  for (let i = 0; i < str.length; i++) {
+    if (bytes[offset + i] !== str.charCodeAt(i)) return false;
+  }
+  return true;
+}
+
+function writeAscii(bytes, offset, str) {
+  for (let i = 0; i < str.length; i++) bytes[offset + i] = str.charCodeAt(i);
+}
+
+function readUint32LE(bytes, offset) {
+  return (
+    bytes[offset] |
+    (bytes[offset + 1] << 8) |
+    (bytes[offset + 2] << 16) |
+    (bytes[offset + 3] << 24)
+  ) >>> 0;
+}
+
+function writeUint32LE(bytes, offset, value) {
+  bytes[offset]     = value & 0xFF;
+  bytes[offset + 1] = (value >>> 8) & 0xFF;
+  bytes[offset + 2] = (value >>> 16) & 0xFF;
+  bytes[offset + 3] = (value >>> 24) & 0xFF;
 }
 
 // ─── CodeplugParser ────────────────────────────────────────────────────────────
@@ -485,39 +534,84 @@ class CodeplugParser {
     return result;
   }
 
+  _customDataBytes() {
+    return new Uint8Array(this.buf, ADDR.CUSTOM_DATA_START, CUSTOM_DATA_SIZE);
+  }
+
+  _hasCustomDataHeader() {
+    return asciiMatches(this._customDataBytes(), 0, CUSTOM_DATA_MAGIC);
+  }
+
+  _ensureCustomDataHeader() {
+    const custom = this._customDataBytes();
+    if (!asciiMatches(custom, 0, CUSTOM_DATA_MAGIC)) {
+      custom.fill(0xFF);
+      writeAscii(custom, 0, CUSTOM_DATA_MAGIC);
+      writeUint32LE(custom, CUSTOM_DATA_MAGIC.length, 1);
+    }
+    return custom;
+  }
+
+  _findCustomDataBlock(typeToFind, uninitLength = 1, autoInit = false) {
+    const custom = autoInit ? this._ensureCustomDataHeader() : this._customDataBytes();
+    if (!asciiMatches(custom, 0, CUSTOM_DATA_MAGIC)) return -1;
+    let pos = CUSTOM_DATA_HEADER_SIZE;
+
+    while (pos < custom.length - CUSTOM_DATA_BLOCK_HEADER_SIZE) {
+      if (custom[pos] === typeToFind) {
+        const valid = typeToFind === CUSTOM_DATA_TYPE.UNINITIALISED
+          ? (pos + CUSTOM_DATA_BLOCK_HEADER_SIZE + uninitLength <= custom.length - CUSTOM_DATA_BLOCK_HEADER_SIZE)
+          : (
+              pos + CUSTOM_DATA_BLOCK_HEADER_SIZE < custom.length - CUSTOM_DATA_BLOCK_HEADER_SIZE &&
+              pos + CUSTOM_DATA_BLOCK_HEADER_SIZE + readUint32LE(custom, pos + 4) <= custom.length - CUSTOM_DATA_BLOCK_HEADER_SIZE
+            );
+        if (valid) return pos;
+      }
+
+      const blockLen = readUint32LE(custom, pos + 4);
+      const nextPos = pos + CUSTOM_DATA_BLOCK_HEADER_SIZE + blockLen;
+      if (nextPos <= pos) break;
+      pos = nextPos;
+    }
+
+    return -1;
+  }
+
   // ── Boot tune ─────────────────────────────────────────────────────────────────
 
   get bootTune() {
-    const v       = this.view;
+    const pos = this._findCustomDataBlock(CUSTOM_DATA_TYPE.MELODY);
+    if (pos < 0) return [];
+    const custom = this._customDataBytes();
     const entries = [];
-    for (let i = 0; i < BOOT_TUNE_MAX; i++) {
-      const base = ADDR.BOOT_TUNE + i * BOOT_TUNE_ENTRY;
-      const note = v.getUint8(base);
-      if (note === 0xFF) break;
-      entries.push({
-        note,
-        dur:   v.getUint8(base + 1),
-        pause: v.getUint8(base + 2),
-        vol:   v.getUint8(base + 3),
-      });
+    const dataPos = pos + CUSTOM_DATA_BLOCK_HEADER_SIZE;
+    const dataLen = Math.min(readUint32LE(custom, pos + 4), BOOT_TUNE_SIZE);
+
+    for (let i = 0; i + 1 < dataLen; i += BOOT_TUNE_ENTRY) {
+      const note = custom[dataPos + i];
+      const dur  = custom[dataPos + i + 1];
+      if (note === 0 && dur === 0) break;
+      entries.push({ note, dur });
     }
     return entries;
   }
 
   writeBootTune(entries) {
-    const v = this.view;
+    const pos = this._findCustomDataBlock(CUSTOM_DATA_TYPE.MELODY, BOOT_TUNE_SIZE, true);
+    if (pos < 0) throw new Error('No room left in OpenGD77 custom data for the boot melody.');
+    const custom = this._customDataBytes();
+    custom[pos]     = CUSTOM_DATA_TYPE.MELODY;
+    custom[pos + 1] = 0;
+    custom[pos + 2] = 0;
+    custom[pos + 3] = 0;
+    writeUint32LE(custom, pos + 4, BOOT_TUNE_SIZE);
+    custom.fill(0x00, pos + CUSTOM_DATA_BLOCK_HEADER_SIZE, pos + CUSTOM_DATA_BLOCK_HEADER_SIZE + BOOT_TUNE_SIZE);
+
     const n = Math.min(entries.length, BOOT_TUNE_MAX);
-    for (let i = 0; i < BOOT_TUNE_MAX; i++) {
-      const base = ADDR.BOOT_TUNE + i * BOOT_TUNE_ENTRY;
-      if (i < n) {
-        v.setUint8(base,     entries[i].note  & 0xFF);
-        v.setUint8(base + 1, entries[i].dur   & 0xFF);
-        v.setUint8(base + 2, entries[i].pause & 0xFF);
-        v.setUint8(base + 3, entries[i].vol   & 0xFF);
-      } else {
-        v.setUint8(base, 0xFF); v.setUint8(base+1, 0xFF);
-        v.setUint8(base+2, 0xFF); v.setUint8(base+3, 0xFF);
-      }
+    for (let i = 0; i < n; i++) {
+      const base = pos + CUSTOM_DATA_BLOCK_HEADER_SIZE + i * BOOT_TUNE_ENTRY;
+      custom[base]     = entries[i].note & 0xFF;
+      custom[base + 1] = entries[i].dur  & 0xFF;
     }
   }
 
@@ -549,16 +643,25 @@ class CodeplugParser {
   // ── Boot image ────────────────────────────────────────────────────────────────
 
   get bootImage() {
-    const end = ADDR.BOOT_IMAGE + BOOT_IMAGE_SIZE;
-    if (end > this.buf.byteLength) return null;
-    const bytes = new Uint8Array(this.buf, ADDR.BOOT_IMAGE, BOOT_IMAGE_SIZE);
-    return bytes.every(b => b === 0xFF) ? null : bytes.slice();
+    const pos = this._findCustomDataBlock(CUSTOM_DATA_TYPE.IMAGE);
+    if (pos < 0) return null;
+    const custom = this._customDataBytes();
+    const dataPos = pos + CUSTOM_DATA_BLOCK_HEADER_SIZE;
+    return custom.slice(dataPos, dataPos + BOOT_IMAGE_SIZE);
   }
 
   writeBootImage(bits) {
-    const v = this.view;
+    const pos = this._findCustomDataBlock(CUSTOM_DATA_TYPE.IMAGE, BOOT_IMAGE_SIZE, true);
+    if (pos < 0) throw new Error('No room left in OpenGD77 custom data for the boot image.');
+    const custom = this._customDataBytes();
+    custom[pos]     = CUSTOM_DATA_TYPE.IMAGE;
+    custom[pos + 1] = 0;
+    custom[pos + 2] = 0;
+    custom[pos + 3] = 0;
+    writeUint32LE(custom, pos + 4, BOOT_IMAGE_SIZE);
+    custom.fill(0x00, pos + CUSTOM_DATA_BLOCK_HEADER_SIZE, pos + CUSTOM_DATA_BLOCK_HEADER_SIZE + BOOT_IMAGE_SIZE);
     const n = Math.min(bits.length, BOOT_IMAGE_SIZE);
-    for (let i = 0; i < n; i++) v.setUint8(ADDR.BOOT_IMAGE + i, bits[i]);
+    for (let i = 0; i < n; i++) custom[pos + CUSTOM_DATA_BLOCK_HEADER_SIZE + i] = bits[i];
   }
 
   // ── Serialise ─────────────────────────────────────────────────────────────────
@@ -575,6 +678,15 @@ class CodeplugParser {
     // Mark 80-channel zone format so the probe byte (0x806F) reads as 0x00
     // (upper byte of channel index 23 in zone 0 — value ≤ 0x04 selects 80-ch format).
     view.setUint8(ADDR.ZONE_FMT_PROBE, 0x00);
+    fillZero(view, ADDR.LAST_USED_CHANNELS, LAST_USED_CHANNELS_SIZE);
+    for (let i = 0; i < LAST_USED_CHANNELS_MAGIC.length; i++) {
+      view.setUint8(ADDR.LAST_USED_CHANNELS + i, LAST_USED_CHANNELS_MAGIC.charCodeAt(i));
+    }
+    fillFF(view, ADDR.CUSTOM_DATA_START, CUSTOM_DATA_SIZE);
+    for (let i = 0; i < CUSTOM_DATA_MAGIC.length; i++) {
+      view.setUint8(ADDR.CUSTOM_DATA_START + i, CUSTOM_DATA_MAGIC.charCodeAt(i));
+    }
+    view.setUint32(ADDR.CUSTOM_DATA_START + CUSTOM_DATA_MAGIC.length, 1, true);
     const p = new CodeplugParser(buf);
     p.filename = 'new_codeplug.cdmr';
     return p;
