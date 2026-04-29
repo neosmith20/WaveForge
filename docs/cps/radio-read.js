@@ -27,6 +27,12 @@
 const CPRD_SERIAL_FILTERS = [{ usbVendorId: 0x1FC9, usbProductId: 0x0094 }];
 const CPRD_MAX_CHUNK      = 2045; // firmware-side request cap
 const CPRD_MAX_RETRIES    = 0;    // keep pressure low; no hammering
+const CPRD_EEPROM_TAIL0   = 0xF0;
+const CPRD_EEPROM_TAIL1   = 0xF8;
+const CPRD_EEPROM_TAIL2   = 0xFE;
+const CPRD_EEPROM_TAIL0_CHUNK = 0x04;
+const CPRD_EEPROM_TAIL1_CHUNK = 0x02;
+const CPRD_EEPROM_TAIL2_CHUNK = 0x01;
 
 function cprdDelay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -87,6 +93,41 @@ async function cprdReadChunk(writer, acc, area, address, length, interReadDelayM
   return null;
 }
 
+function cprdPlanChunkLength(area, address, remaining, requestedChunkSize) {
+  if (area !== 2) {
+    return Math.min(requestedChunkSize, remaining);
+  }
+
+  const pageOffset = address & 0xFF;
+
+  if (pageOffset < CPRD_EEPROM_TAIL0) {
+    return Math.min(requestedChunkSize, remaining, CPRD_EEPROM_TAIL0 - pageOffset);
+  }
+  if (pageOffset < CPRD_EEPROM_TAIL1) {
+    return Math.min(CPRD_EEPROM_TAIL0_CHUNK, remaining, CPRD_EEPROM_TAIL1 - pageOffset);
+  }
+  if (pageOffset < CPRD_EEPROM_TAIL2) {
+    return Math.min(CPRD_EEPROM_TAIL1_CHUNK, remaining, CPRD_EEPROM_TAIL2 - pageOffset);
+  }
+  return Math.min(CPRD_EEPROM_TAIL2_CHUNK, remaining);
+}
+
+function cprdBuildReadPlan(area, start, length, chunkSize) {
+  const plan = [];
+  let offset = 0;
+
+  while (offset < length) {
+    const address = (start + offset) >>> 0;
+    const remaining = length - offset;
+    const plannedLength = cprdPlanChunkLength(area, address, remaining, chunkSize);
+
+    plan.push({ address, offset, length: plannedLength });
+    offset += plannedLength;
+  }
+
+  return plan;
+}
+
 async function cprawDumpRange(options, onProgress) {
   const area = Number(options.area);
   const start = Number(options.start) >>> 0;
@@ -109,7 +150,8 @@ async function cprawDumpRange(options, onProgress) {
   let acc = null;
 
   const chunks = [];
-  const totalChunks = Math.ceil(length / chunkSize);
+  const plan = cprdBuildReadPlan(area, start, length, chunkSize);
+  const totalChunks = plan.length;
   let bytesRead = 0;
   let failedAt = null;
   let errorMessage = null;
@@ -120,21 +162,23 @@ async function cprawDumpRange(options, onProgress) {
     writer = port.writable.getWriter();
     acc = new SerialAccumulator(port.readable.getReader());
 
-    for (let offset = 0, chunkIndex = 0; offset < length; offset += chunkSize, chunkIndex++) {
-      const len = Math.min(chunkSize, length - offset);
-      const address = (start + offset) >>> 0;
+    for (let chunkIndex = 0; chunkIndex < plan.length; chunkIndex++) {
+      const step = plan[chunkIndex];
+      const address = step.address;
+      const len = step.length;
+      const boundarySafe = (len !== chunkSize);
 
       try {
         const data = await cprdReadChunk(writer, acc, area, address, len, interReadDelayMs);
         if (!data) {
-          failedAt = { address, offset, length: len, chunkIndex };
+          failedAt = { address, offset: step.offset, length: len, chunkIndex };
           errorMessage = `Read failed at area=${area} addr=0x${address.toString(16).toUpperCase().padStart(5, '0')} len=0x${len.toString(16).toUpperCase()}`;
           break;
         }
         chunks.push(data);
         bytesRead += data.length;
       } catch (err) {
-        failedAt = { address, offset, length: len, chunkIndex };
+        failedAt = { address, offset: step.offset, length: len, chunkIndex };
         errorMessage = err.message || String(err);
         break;
       }
@@ -142,7 +186,7 @@ async function cprawDumpRange(options, onProgress) {
       const pct = Math.round(((chunkIndex + 1) / totalChunks) * 100);
       onProgress({
         pct,
-        msg: `Reading 0x${address.toString(16).toUpperCase().padStart(5, '0')} (${chunkIndex + 1}/${totalChunks})…`,
+        msg: `Reading 0x${address.toString(16).toUpperCase().padStart(5, '0')} len=0x${len.toString(16).toUpperCase()}${boundarySafe ? ' boundary-safe' : ''} (${chunkIndex + 1}/${totalChunks})…`,
       });
     }
 
@@ -166,6 +210,8 @@ async function cprawDumpRange(options, onProgress) {
         length,
         chunkSize,
         interReadDelayMs,
+        boundaryAwareEeprom: (area === 2),
+        plannedChunks: totalChunks,
       },
     };
   } finally {

@@ -552,6 +552,8 @@
         <code>firmware/application/source/usb/usb_com.c</code>.
         Raw dump proof now confirms the zone block is direct-mapped in EEPROM at
         <code>area=2 start=0x08000</code>.
+        EEPROM reads are automatically split into smaller tail requests near fragile
+        <code>...F0</code>, <code>...F8</code>, and page-end boundaries.
         The dump stops on the first failed chunk. If any bytes were collected, a partial dump is still downloaded.
       </div>
       <div class="field-group">
