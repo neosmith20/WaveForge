@@ -17,7 +17,7 @@
 // Raw range dump is still available for targeted inspection, but the new
 // cpreadReadCodeplug() path now mirrors the original OpenGD77 CPS segment map.
 
-const CPRD_VERSION        = 'radio-read.js 2026-04-28 cps-map-v1';
+const CPRD_VERSION        = 'radio-read.js 2026-04-29 serial-proto-v1';
 const CPRD_SERIAL_FILTERS = [{ usbVendorId: 0x1FC9, usbProductId: 0x0094 }];
 const CPRD_MAX_CHUNK      = 2045; // firmware-side request cap
 const CPRD_MAX_RETRIES    = 0;    // keep pressure low; no hammering
@@ -31,6 +31,8 @@ const CPRD_MODE_READ_RADIO_INFO = 0x09;
 const CPRD_BUFFER_DATE_CUTOFF   = 20211002;
 const CPRD_STM32_RADIO_TYPES    = new Set([5, 6, 7, 8, 9, 10]);
 const CPRD_CONNECT_TIMEOUT_MS   = 1000;
+const CPRD_INIT_SETTLE_MS       = 75;
+const CPRD_DRAIN_IDLE_MS        = 75;
 const CPRD_CODEPLUG_SEGMENTS = [
   { fileStart: 0x00080, fileEnd: 0x06000, area: 1, radioStart: 0x00080, label: 'Codeplug block 1' },
   { fileStart: 0x06000, fileEnd: 0x0604A, area: 1, radioStart: 0x06000, label: 'Last used channels' },
@@ -48,6 +50,21 @@ window.addEventListener('DOMContentLoaded', () => {
 
 function cprdDelay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function cprdHexAll(data) {
+  if (!data) return '(none)';
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  if (bytes.length === 0) return '(empty)';
+  return Array.from(bytes, b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+}
+
+function cprdLogRaw(direction, bytes, label = '') {
+  const prefix = label ? `[CPRD] ${direction} ${label}` : `[CPRD] ${direction}`;
+  console.log(prefix, {
+    length: bytes?.length ?? 0,
+    hex: cprdHexAll(bytes),
+  });
 }
 
 const CPRD_SERIAL_SESSION_STATE = {
@@ -199,6 +216,11 @@ function cprdHexBytes(data, count = 8) {
   return Array.from(bytes.subarray(0, count), b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
 }
 
+async function cprdWriteBytes(writer, bytes, label = '') {
+  cprdLogRaw('TX', bytes, label);
+  await writer.write(bytes);
+}
+
 class SerialAccumulator {
   constructor(reader) {
     this._reader  = reader;
@@ -230,6 +252,7 @@ class SerialAccumulator {
       const chunk = value instanceof Uint8Array
         ? value
         : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+      cprdLogRaw('RX', chunk, 'chunk');
       const merged = new Uint8Array(this._pending.length + chunk.length);
       merged.set(this._pending, 0);
       merged.set(chunk, this._pending.length);
@@ -241,11 +264,14 @@ class SerialAccumulator {
   }
 
   clearPending() {
+    if (this._pending.length > 0) {
+      cprdLogRaw('DROP', this._pending, 'pending');
+    }
     this._pending = new Uint8Array(0);
   }
 
   async readSome(options = {}) {
-    const { timeoutMs = 0, timeoutLabel = '' } = options;
+    const { timeoutMs = 0, timeoutLabel = '', suppressTimeoutLog = false } = options;
     if (this._pending.length > 0) {
       const out = this._pending;
       this._pending = new Uint8Array(0);
@@ -261,7 +287,9 @@ class SerialAccumulator {
       ]);
       if (result === timeoutToken) {
         const label = timeoutLabel || 'serial response';
-        console.warn('[CPRD] timeout at stage', { label, timeoutMs });
+        if (!suppressTimeoutLog) {
+          console.warn('[CPRD] timeout at stage', { label, timeoutMs });
+        }
         return null;
       }
     } else {
@@ -273,6 +301,7 @@ class SerialAccumulator {
     const chunk = value instanceof Uint8Array
       ? value
       : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    cprdLogRaw('RX', chunk, 'chunk');
     return chunk;
   }
 
@@ -281,6 +310,29 @@ class SerialAccumulator {
   }
 
   releaseLock() { this._reader.releaseLock(); }
+}
+
+async function cprdClearInputBuffer(acc, options = {}) {
+  const {
+    idleMs = CPRD_DRAIN_IDLE_MS,
+    label = 'input buffer',
+  } = options;
+
+  acc.clearPending();
+
+  let drained = 0;
+  while (true) {
+    const chunk = await acc.readSome({
+      timeoutMs: idleMs,
+      timeoutLabel: `${label} drain`,
+      suppressTimeoutLog: true,
+    });
+    if (!chunk || chunk.length === 0) break;
+    drained += chunk.length;
+    cprdLogRaw('DROP', chunk, `${label} drain`);
+  }
+
+  console.log('[CPRD] input drain complete', { label, drained });
 }
 
 function cprdDecodeCString(bytes, offset, len) {
@@ -352,7 +404,7 @@ async function cprdSendCommand(writer, acc, commandNumber, options = {}) {
       context: context || undefined,
     });
   }
-  await writer.write(req.subarray(0, len));
+  await cprdWriteBytes(writer, req.subarray(0, len), `command 0x${commandNumber.toString(16).toUpperCase()}`);
   // Native CPS waits for pending writes to clear and then sleeps 50 ms.
   await cprdDelay(50);
   const ack = await acc.readExact(2, {
@@ -422,11 +474,8 @@ async function cprdNativeProbeCommand(writer, acc, commandNumber, {
   requireAck = true,
 } = {}) {
   const req = cprdBuildCommandBytes(commandNumber);
-  console.log(`[CPRD] ${stageName}`, {
-    command: `0x${commandNumber.toString(16).toUpperCase()}`,
-    bytes: Array.from(req, b => `0x${b.toString(16).toUpperCase().padStart(2, '0')}`),
-  });
-  await writer.write(req);
+  console.log(`[CPRD] ${stageName}`, { command: `0x${commandNumber.toString(16).toUpperCase()}` });
+  await cprdWriteBytes(writer, req, stageName);
   await cprdDelay(50);
 
   const response = await acc.readSome({
@@ -450,51 +499,22 @@ async function cprdNativeProbeCommand(writer, acc, commandNumber, {
 }
 
 async function cprdPrimeRadioConnection(writer, acc, { stealth = false } = {}) {
-  // Decompiled OpenGD77 CPS probe sequence:
-  // 1. sendCommand(..., 254) and ignore the result
-  // 2. DiscardInBuffer()
-  // 3. sendCommand(..., stealth ? 254 : 0) and hard-fail if rejected
-  console.log('[CPRD] waiting/not waiting for 0xFE reply', {
-    mode: 'native-like optional wait',
-    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-  });
-  await cprdNativeProbeCommand(writer, acc, 0xFE, {
-    stageName: 'sending 0xFE',
-    requireAck: false,
-  });
-  console.log('[CPRD] clearing/discarding stale input after 0xFE');
-  acc.clearAllPending();
+  const initByte = stealth ? 0xFE : 0x00;
 
-  const connectCommand = stealth ? 0xFE : 0x00;
-  const connectReply = await cprdNativeProbeCommand(writer, acc, connectCommand, {
-    stageName: 'sending connect command',
-    requireAck: true,
-  });
-  if (!connectReply || connectReply.length < 2 || connectReply[1] !== (connectCommand & 0xFF)) {
-    const ackHex = cprdHexBytes(connectReply || new Uint8Array(0), 8);
-    throw new Error(`Radio rejected ${stealth ? 'stealth connect' : 'connect/entry handshake'}. Ack=${ackHex || '(none)'}.`);
-  }
+  await cprdWriteBytes(writer, new Uint8Array([CPRD_CMD_BYTE, 0xFE]), 'init 0xFE');
+  await cprdDelay(CPRD_INIT_SETTLE_MS);
+  await cprdClearInputBuffer(acc, { label: 'post-0xFE' });
+
+  await cprdWriteBytes(writer, new Uint8Array([CPRD_CMD_BYTE, initByte]), `init 0x${initByte.toString(16).toUpperCase().padStart(2, '0')}`);
+  await cprdDelay(CPRD_INIT_SETTLE_MS);
+  await cprdClearInputBuffer(acc, { label: 'post-connect' });
 }
 
 async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
-  if (!stealth) {
-    await cprdSendPreambleCommand(writer, acc, 0, { context: 'radio info preamble 0x0', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
-    await cprdSendPreambleCommand(writer, acc, 1, { context: 'radio info preamble 0x1', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
-    await cprdSendPreambleCommand(writer, acc, 2, { y: 0,  size: 3, alignment: 1, message: 'CPS', context: 'radio info title line 1', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
-    await cprdSendPreambleCommand(writer, acc, 2, { y: 16, size: 3, alignment: 1, message: 'Read', context: 'radio info title line 2', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
-    await cprdSendPreambleCommand(writer, acc, 2, { y: 32, size: 3, alignment: 1, message: 'Radio', context: 'radio info title line 3', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
-    await cprdSendPreambleCommand(writer, acc, 2, { y: 48, size: 3, alignment: 1, message: 'Info', context: 'radio info title line 4', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
-    await cprdSendPreambleCommand(writer, acc, 3, { context: 'radio info display refresh', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
-    await cprdSendPreambleCommand(writer, acc, 6, { xOrOption: 4, context: 'radio info status mode', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
-  }
-
   const req = new Uint8Array(8);
   req[0] = CPRD_READ_BYTE;
   req[1] = CPRD_MODE_READ_RADIO_INFO;
-  console.log('[CPRD] radio info request sent', {
-    bytes: Array.from(req, b => `0x${b.toString(16).toUpperCase().padStart(2, '0')}`),
-  });
-  await writer.write(req);
+  await cprdWriteBytes(writer, req, 'radio info request');
 
   const status = await acc.readExact(1, {
     timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
@@ -513,26 +533,19 @@ async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
     timeoutLabel: 'radio info payload',
   });
 
-  if (!stealth) {
-    await cprdSendPreambleCommand(writer, acc, 5, { context: 'radio info teardown', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
-  }
-
   return cprdParseRadioInfo(payload);
 }
 
 async function cprdBeginCodeplugReadTask(writer, acc) {
-  await cprdSendPreambleCommand(writer, acc, 1, { context: 'begin read task 0x1' });
-  await cprdSendPreambleCommand(writer, acc, 2, { y: 0,  size: 3, alignment: 1, message: 'CPS', context: 'begin read task line 1' });
-  await cprdSendPreambleCommand(writer, acc, 2, { y: 16, size: 3, alignment: 1, message: 'Reading', context: 'begin read task line 2' });
-  await cprdSendPreambleCommand(writer, acc, 2, { y: 32, size: 3, alignment: 1, message: 'Codeplug', context: 'begin read task line 3' });
-  await cprdSendPreambleCommand(writer, acc, 3, { context: 'begin read task display refresh' });
-  await cprdSendPreambleCommand(writer, acc, 6, { xOrOption: 3, context: 'begin read task status mode 3' });
-  await cprdSendPreambleCommand(writer, acc, 6, { xOrOption: 2, context: 'begin read task status mode 2' });
+  void writer;
+  void acc;
+  console.log('[CPRD] begin read task: serial read protocol only');
 }
 
 async function cprdEndCodeplugReadTask(writer, acc) {
-  await cprdSendPreambleCommand(writer, acc, 5, { context: 'end read task 0x5' });
-  await cprdSendPreambleCommand(writer, acc, 7, { context: 'end read task 0x7' });
+  void writer;
+  void acc;
+  console.log('[CPRD] end read task: serial read protocol only');
 }
 
 async function cprdRequest(writer, acc, area, address, length, interReadDelayMs) {
@@ -547,13 +560,22 @@ async function cprdRequest(writer, acc, area, address, length, interReadDelayMs)
   req[5] =  address         & 0xFF;
   req[6] = (length  >>>  8) & 0xFF;
   req[7] =  length          & 0xFF;
-  await writer.write(req);
+  await cprdWriteBytes(writer, req, `read area=${area} addr=0x${address.toString(16).toUpperCase().padStart(5, '0')} len=0x${length.toString(16).toUpperCase()}`);
 
-  const status = await acc.readExact(1);
+  const status = await acc.readExact(1, {
+    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+    timeoutLabel: `read status 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
+  });
   if (status[0] !== 0x52) return null;
-  const lenBytes = await acc.readExact(2);
+  const lenBytes = await acc.readExact(2, {
+    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+    timeoutLabel: `read length 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
+  });
   const respLen = (lenBytes[0] << 8) | lenBytes[1];
-  return acc.readExact(respLen);
+  return acc.readExact(respLen, {
+    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+    timeoutLabel: `read payload 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
+  });
 }
 
 async function cprdReadChunk(writer, acc, area, address, length, interReadDelayMs) {
@@ -692,6 +714,9 @@ async function cprawDumpRange(options, onProgress) {
     session = await cprdOpenSerialSession(CPRD_SERIAL_FILTERS, 'cprawDumpRange');
     session.writer.__cprdSession = session;
     const { writer, acc } = session;
+    await cprdPrimeRadioConnection(writer, acc);
+    const radioInfo = await cprdReadRadioInfo(writer, acc);
+    console.log('[CPRD] raw dump radio info', radioInfo);
 
     for (let offset = 0, chunkIndex = 0; offset < length; offset += chunkSize, chunkIndex++) {
       const len = Math.min(chunkSize, length - offset);
@@ -746,6 +771,7 @@ async function cprawDumpRange(options, onProgress) {
         chunkSize,
         interReadDelayMs,
         version: CPRD_VERSION,
+        radioInfo,
       },
     };
   } finally {
