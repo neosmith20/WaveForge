@@ -141,17 +141,17 @@ async function cpwrWriteSegment(writer, acc, src, segment, progressState, onProg
 }
 
 async function cpwrBeginCodeplugWriteTask(writer, acc) {
-  await cprdSendCommand(writer, acc, 1);
-  await cprdSendCommand(writer, acc, 2, { y: 0,  size: 3, alignment: 1, message: 'CPS' });
-  await cprdSendCommand(writer, acc, 2, { y: 16, size: 3, alignment: 1, message: 'Writing' });
-  await cprdSendCommand(writer, acc, 2, { y: 32, size: 3, alignment: 1, message: 'Codeplug' });
-  await cprdSendCommand(writer, acc, 3);
-  await cprdSendCommand(writer, acc, 6, { xOrOption: 4 });
-  await cprdSendCommand(writer, acc, 6, { xOrOption: 2 });
+  await cprdSendPreambleCommand(writer, acc, 1, { context: 'begin write task 0x1' });
+  await cprdSendPreambleCommand(writer, acc, 2, { y: 0,  size: 3, alignment: 1, message: 'CPS', context: 'begin write task line 1' });
+  await cprdSendPreambleCommand(writer, acc, 2, { y: 16, size: 3, alignment: 1, message: 'Writing', context: 'begin write task line 2' });
+  await cprdSendPreambleCommand(writer, acc, 2, { y: 32, size: 3, alignment: 1, message: 'Codeplug', context: 'begin write task line 3' });
+  await cprdSendPreambleCommand(writer, acc, 3, { context: 'begin write task display refresh' });
+  await cprdSendPreambleCommand(writer, acc, 6, { xOrOption: 4, context: 'begin write task status mode 4' });
+  await cprdSendPreambleCommand(writer, acc, 6, { xOrOption: 2, context: 'begin write task status mode 2' });
 }
 
 async function cpwrEndCodeplugWriteTask(writer, acc) {
-  await cprdSendCommand(writer, acc, 6, { xOrOption: 0 });
+  await cprdSendPreambleCommand(writer, acc, 6, { xOrOption: 0, context: 'end write task status mode 0' });
 }
 
 async function cpwrVerifySegments(writer, acc, src, chunkSize, onProgress) {

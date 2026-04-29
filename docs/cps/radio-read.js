@@ -116,6 +116,8 @@ async function cprdSendCommand(writer, acc, commandNumber, options = {}) {
     alignment = 0,
     inverted = 0,
     message = '',
+    fatal = true,
+    context = '',
   } = options;
 
   const req = new Uint8Array(32);
@@ -139,20 +141,32 @@ async function cprdSendCommand(writer, acc, commandNumber, options = {}) {
   await writer.write(req.subarray(0, len));
   const ack = await acc.readExact(2);
   if (ack[1] !== (commandNumber & 0xFF)) {
-    throw new Error(`Radio rejected command 0x${commandNumber.toString(16).toUpperCase()}.`);
+    const commandHex = `0x${commandNumber.toString(16).toUpperCase()}`;
+    const ackHex = cprdHexBytes(ack, 2);
+    const suffix = context ? ` (${context})` : '';
+    if (fatal) {
+      throw new Error(`Radio rejected command ${commandHex}${suffix}. Ack=${ackHex}.`);
+    }
+    console.warn(`[CPRD] non-fatal command rejected: ${commandHex}${suffix}. Ack=${ackHex}.`);
+    return false;
   }
+  return true;
+}
+
+async function cprdSendPreambleCommand(writer, acc, commandNumber, options = {}) {
+  return cprdSendCommand(writer, acc, commandNumber, { ...options, fatal: false });
 }
 
 async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
   if (!stealth) {
-    await cprdSendCommand(writer, acc, 0);
-    await cprdSendCommand(writer, acc, 1);
-    await cprdSendCommand(writer, acc, 2, { y: 0,  size: 3, alignment: 1, message: 'CPS' });
-    await cprdSendCommand(writer, acc, 2, { y: 16, size: 3, alignment: 1, message: 'Read' });
-    await cprdSendCommand(writer, acc, 2, { y: 32, size: 3, alignment: 1, message: 'Radio' });
-    await cprdSendCommand(writer, acc, 2, { y: 48, size: 3, alignment: 1, message: 'Info' });
-    await cprdSendCommand(writer, acc, 3);
-    await cprdSendCommand(writer, acc, 6, { xOrOption: 4 });
+    await cprdSendCommand(writer, acc, 0, { context: 'connect/entry handshake' });
+    await cprdSendPreambleCommand(writer, acc, 1, { context: 'radio info preamble 0x1' });
+    await cprdSendPreambleCommand(writer, acc, 2, { y: 0,  size: 3, alignment: 1, message: 'CPS', context: 'radio info title line 1' });
+    await cprdSendPreambleCommand(writer, acc, 2, { y: 16, size: 3, alignment: 1, message: 'Read', context: 'radio info title line 2' });
+    await cprdSendPreambleCommand(writer, acc, 2, { y: 32, size: 3, alignment: 1, message: 'Radio', context: 'radio info title line 3' });
+    await cprdSendPreambleCommand(writer, acc, 2, { y: 48, size: 3, alignment: 1, message: 'Info', context: 'radio info title line 4' });
+    await cprdSendPreambleCommand(writer, acc, 3, { context: 'radio info display refresh' });
+    await cprdSendPreambleCommand(writer, acc, 6, { xOrOption: 4, context: 'radio info status mode' });
   }
 
   const req = new Uint8Array(8);
@@ -169,25 +183,25 @@ async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
   const payload = await acc.readExact(len);
 
   if (!stealth) {
-    await cprdSendCommand(writer, acc, 5);
+    await cprdSendPreambleCommand(writer, acc, 5, { context: 'radio info teardown' });
   }
 
   return cprdParseRadioInfo(payload);
 }
 
 async function cprdBeginCodeplugReadTask(writer, acc) {
-  await cprdSendCommand(writer, acc, 1);
-  await cprdSendCommand(writer, acc, 2, { y: 0,  size: 3, alignment: 1, message: 'CPS' });
-  await cprdSendCommand(writer, acc, 2, { y: 16, size: 3, alignment: 1, message: 'Reading' });
-  await cprdSendCommand(writer, acc, 2, { y: 32, size: 3, alignment: 1, message: 'Codeplug' });
-  await cprdSendCommand(writer, acc, 3);
-  await cprdSendCommand(writer, acc, 6, { xOrOption: 3 });
-  await cprdSendCommand(writer, acc, 6, { xOrOption: 2 });
+  await cprdSendPreambleCommand(writer, acc, 1, { context: 'begin read task 0x1' });
+  await cprdSendPreambleCommand(writer, acc, 2, { y: 0,  size: 3, alignment: 1, message: 'CPS', context: 'begin read task line 1' });
+  await cprdSendPreambleCommand(writer, acc, 2, { y: 16, size: 3, alignment: 1, message: 'Reading', context: 'begin read task line 2' });
+  await cprdSendPreambleCommand(writer, acc, 2, { y: 32, size: 3, alignment: 1, message: 'Codeplug', context: 'begin read task line 3' });
+  await cprdSendPreambleCommand(writer, acc, 3, { context: 'begin read task display refresh' });
+  await cprdSendPreambleCommand(writer, acc, 6, { xOrOption: 3, context: 'begin read task status mode 3' });
+  await cprdSendPreambleCommand(writer, acc, 6, { xOrOption: 2, context: 'begin read task status mode 2' });
 }
 
 async function cprdEndCodeplugReadTask(writer, acc) {
-  await cprdSendCommand(writer, acc, 5);
-  await cprdSendCommand(writer, acc, 7);
+  await cprdSendPreambleCommand(writer, acc, 5, { context: 'end read task 0x5' });
+  await cprdSendPreambleCommand(writer, acc, 7, { context: 'end read task 0x7' });
 }
 
 async function cprdRequest(writer, acc, area, address, length, interReadDelayMs) {
