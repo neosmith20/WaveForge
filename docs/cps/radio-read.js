@@ -244,7 +244,39 @@ class SerialAccumulator {
     this._pending = new Uint8Array(0);
   }
 
-  async drainQuiet(_idleMs = 50) {
+  async readSome(options = {}) {
+    const { timeoutMs = 0, timeoutLabel = '' } = options;
+    if (this._pending.length > 0) {
+      const out = this._pending;
+      this._pending = new Uint8Array(0);
+      return out;
+    }
+
+    let result;
+    if (timeoutMs > 0) {
+      const timeoutToken = Symbol('timeout');
+      result = await Promise.race([
+        this._reader.read(),
+        cprdDelay(timeoutMs).then(() => timeoutToken),
+      ]);
+      if (result === timeoutToken) {
+        const label = timeoutLabel || 'serial response';
+        console.warn('[CPRD] timeout at stage', { label, timeoutMs });
+        return null;
+      }
+    } else {
+      result = await this._reader.read();
+    }
+
+    const { value, done } = result;
+    if (done) throw new Error('Serial port closed unexpectedly.');
+    const chunk = value instanceof Uint8Array
+      ? value
+      : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    return chunk;
+  }
+
+  clearAllPending() {
     this.clearPending();
   }
 
@@ -353,27 +385,95 @@ async function cprdSendPreambleCommand(writer, acc, commandNumber, options = {})
   return cprdSendCommand(writer, acc, commandNumber, { ...options, fatal: false });
 }
 
+function cprdBuildCommandBytes(commandNumber, options = {}) {
+  const {
+    xOrOption = 0,
+    y = 0,
+    size = 0,
+    alignment = 0,
+    inverted = 0,
+    message = '',
+  } = options;
+
+  const req = new Uint8Array(32);
+  let len = 2;
+  req[0] = CPRD_CMD_BYTE;
+  req[1] = commandNumber & 0xFF;
+
+  if (commandNumber === 2) {
+    const encoded = new TextEncoder().encode(String(message).slice(0, 16));
+    req[3] = y & 0xFF;
+    req[4] = size & 0xFF;
+    req[5] = alignment & 0xFF;
+    req[6] = inverted & 0xFF;
+    req.set(encoded, 7);
+    len = 7 + encoded.length;
+  } else if (commandNumber === 6) {
+    req[2] = xOrOption & 0xFF;
+    len = 3;
+  }
+
+  return req.subarray(0, len);
+}
+
+async function cprdNativeProbeCommand(writer, acc, commandNumber, {
+  stageName,
+  timeoutMs = CPRD_CONNECT_TIMEOUT_MS,
+  requireAck = true,
+} = {}) {
+  const req = cprdBuildCommandBytes(commandNumber);
+  console.log(`[CPRD] ${stageName}`, {
+    command: `0x${commandNumber.toString(16).toUpperCase()}`,
+    bytes: Array.from(req, b => `0x${b.toString(16).toUpperCase().padStart(2, '0')}`),
+  });
+  await writer.write(req);
+  await cprdDelay(50);
+
+  const response = await acc.readSome({
+    timeoutMs,
+    timeoutLabel: stageName,
+  });
+  if (!response) {
+    if (requireAck) {
+      throw new Error(`Timed out waiting for ${stageName}.`);
+    }
+    console.warn('[CPRD] no reply for optional probe stage', { stageName });
+    return null;
+  }
+
+  const ackList = Array.from(response, b => `0x${b.toString(16).toUpperCase().padStart(2, '0')}`);
+  console.log('[CPRD] received ack bytes', {
+    stageName,
+    ack: ackList,
+  });
+  return response;
+}
+
 async function cprdPrimeRadioConnection(writer, acc, { stealth = false } = {}) {
   // Decompiled OpenGD77 CPS probe sequence:
   // 1. sendCommand(..., 254) and ignore the result
   // 2. DiscardInBuffer()
   // 3. sendCommand(..., stealth ? 254 : 0) and hard-fail if rejected
-  console.log('[CPRD] first command sent', { command: '0xFE', context: 'probe preamble 0xFE' });
-  await cprdSendPreambleCommand(writer, acc, 0xFE, {
-    context: 'probe preamble 0xFE',
+  console.log('[CPRD] waiting/not waiting for 0xFE reply', {
+    mode: 'native-like optional wait',
     timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-    logAck: true,
   });
-  await acc.drainQuiet(50);
-  console.log('[CPRD] second command sent', {
-    command: stealth ? '0xFE' : '0x00',
-    context: stealth ? 'probe stealth handshake 0xFE' : 'connect/entry handshake',
+  await cprdNativeProbeCommand(writer, acc, 0xFE, {
+    stageName: 'sending 0xFE',
+    requireAck: false,
   });
-  await cprdSendCommand(writer, acc, stealth ? 0xFE : 0x00, {
-    context: stealth ? 'probe stealth handshake 0xFE' : 'connect/entry handshake',
-    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-    logAck: true,
+  console.log('[CPRD] clearing/discarding stale input after 0xFE');
+  acc.clearAllPending();
+
+  const connectCommand = stealth ? 0xFE : 0x00;
+  const connectReply = await cprdNativeProbeCommand(writer, acc, connectCommand, {
+    stageName: 'sending connect command',
+    requireAck: true,
   });
+  if (!connectReply || connectReply.length < 2 || connectReply[1] !== (connectCommand & 0xFF)) {
+    const ackHex = cprdHexBytes(connectReply || new Uint8Array(0), 8);
+    throw new Error(`Radio rejected ${stealth ? 'stealth connect' : 'connect/entry handshake'}. Ack=${ackHex || '(none)'}.`);
+  }
 }
 
 async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
