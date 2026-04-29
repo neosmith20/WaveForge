@@ -32,6 +32,7 @@ const CHANNELS_MAX = 128;
 const ZONES_MAX    = 68;
 const CONTACTS_MAX = 1024;
 const RXG_MAX      = 76;
+const CHANNEL_DEBUG_NUMBERS = new Set([1, 5, 6, 41, 42]);
 
 const CUSTOM_DATA_MAGIC             = 'OpenGD77';
 const CUSTOM_DATA_HEADER_SIZE       = CUSTOM_DATA_MAGIC.length + 4;
@@ -98,6 +99,11 @@ function freqToMHz(tenHz) {
 
 function readTgId(view, offset) {
   return bcd2int(byteSwap32(view.getUint32(offset, true)));
+}
+
+function hexBytes(data, count = data.length) {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  return Array.from(bytes.subarray(0, count), b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
 }
 
 function decodeCss(raw) {
@@ -221,6 +227,39 @@ class CodeplugParser {
     const probeByte = this.view.getUint8(ADDR.ZONE_FMT_PROBE);
     this._channelsPerZone = (probeByte >= 0x05 && probeByte <= 0xFE) ? 16 : 80;
     this._zoneStructSize  = 16 + this._channelsPerZone * 2;  // 48 or 176
+    this._channelDebugOffsets = [];
+  }
+
+  _channelBaseOffset(slotIndex) {
+    const bank = Math.floor(slotIndex / 128);
+    const indexInBank = slotIndex % 128;
+    if (bank === 0) {
+      return ADDR.CHANNELS + indexInBank * CHANNEL_STRUCT_SIZE;
+    }
+
+    const bankHeaderBase = 0x0B1B0 + (bank - 1) * (16 + 128 * CHANNEL_STRUCT_SIZE);
+    return bankHeaderBase + 16 + indexInBank * CHANNEL_STRUCT_SIZE;
+  }
+
+  _logChannelDebugSummary() {
+    if (this._channelDebugOffsets.length === 0) return;
+    const sorted = [...this._channelDebugOffsets].sort((a, b) => a.number - b.number);
+    const spacing = sorted.slice(1).map((entry, idx) => ({
+      from: sorted[idx].number,
+      to: entry.number,
+      delta: entry.fileOffset - sorted[idx].fileOffset,
+      expectedStrideDelta: (entry.number - sorted[idx].number) * CHANNEL_STRUCT_SIZE,
+    }));
+    console.log('[CPS] channel parser stride check', {
+      stride: CHANNEL_STRUCT_SIZE,
+      offsets: sorted.map(({ number, slotIndex, fileOffset, bank }) => ({
+        number,
+        slotIndex,
+        bank,
+        fileOffset: `0x${fileOffset.toString(16).toUpperCase()}`
+      })),
+      spacing,
+    });
   }
 
   // ── Zone format ───────────────────────────────────────────────────────────────
@@ -255,11 +294,13 @@ class CodeplugParser {
     if (this._channels) return this._channels;
     const v      = this.view;
     const result = [];
+    this._channelDebugOffsets = [];
     for (let i = 0; i < CHANNELS_MAX; i++) {
       const byteIdx = Math.floor(i / 8);
       if (!(v.getUint8(ADDR.CHAN_BITMAP + byteIdx) & (1 << (i % 8)))) continue;
-      result.push(this._decodeChannel(v, ADDR.CHANNELS + i * CHANNEL_STRUCT_SIZE, i + 1, i));
+      result.push(this._decodeChannel(v, this._channelBaseOffset(i), i + 1, i));
     }
+    this._logChannelDebugSummary();
     this._channels = result;
     return result;
   }
@@ -285,7 +326,7 @@ class CodeplugParser {
     const rxOnly     = !!(flag4 & FLAG4_RX_ONLY);
     const rxCss      = isDMR ? null : decodeCss(rxToneRaw);
     const txCss      = isDMR ? null : decodeCss(txToneRaw);
-    return {
+    const decoded = {
       slotIndex,
       number,
       name,
@@ -301,6 +342,23 @@ class CodeplugParser {
       txCssStr:   txCss ? txCss.str : '',
       rxOnly,
     };
+
+    if (CHANNEL_DEBUG_NUMBERS.has(number)) {
+      const raw = new Uint8Array(this.buf, base, Math.min(32, CHANNEL_STRUCT_SIZE));
+      const bank = Math.floor(slotIndex / 128);
+      this._channelDebugOffsets.push({ number, slotIndex, bank, fileOffset: base });
+      console.log('[CPS] channel parser debug', {
+        number,
+        slotIndex,
+        bank,
+        stride: CHANNEL_STRUCT_SIZE,
+        fileOffset: `0x${base.toString(16).toUpperCase()}`,
+        first32: hexBytes(raw, 32),
+        decodedName: decoded.name,
+      });
+    }
+
+    return decoded;
   }
 
   writeChannel(ch) {
