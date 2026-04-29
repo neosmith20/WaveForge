@@ -225,6 +225,7 @@ class SerialAccumulator {
   constructor(reader) {
     this._reader  = reader;
     this._pending = new Uint8Array(0);
+    this._recentRxChunks = [];
   }
 
   async readExact(n, options = {}) {
@@ -253,6 +254,7 @@ class SerialAccumulator {
         ? value
         : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
       cprdLogRaw('RX', chunk, 'chunk');
+      this._rememberRxChunk(chunk);
       const merged = new Uint8Array(this._pending.length + chunk.length);
       merged.set(this._pending, 0);
       merged.set(chunk, this._pending.length);
@@ -302,11 +304,38 @@ class SerialAccumulator {
       ? value
       : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
     cprdLogRaw('RX', chunk, 'chunk');
+    this._rememberRxChunk(chunk);
     return chunk;
   }
 
   clearAllPending() {
     this.clearPending();
+  }
+
+  prependPending(bytes) {
+    if (!bytes || bytes.length === 0) return;
+    const merged = new Uint8Array(bytes.length + this._pending.length);
+    merged.set(bytes, 0);
+    merged.set(this._pending, bytes.length);
+    this._pending = merged;
+  }
+
+  getRecentRxHex(maxBytes = 64) {
+    if (this._recentRxChunks.length === 0) return '(none)';
+    const flattened = [];
+    for (const chunk of this._recentRxChunks) {
+      for (const b of chunk) flattened.push(b);
+    }
+    const slice = flattened.slice(-Math.max(1, maxBytes));
+    return cprdHexAll(Uint8Array.from(slice));
+  }
+
+  _rememberRxChunk(chunk) {
+    const copy = new Uint8Array(chunk);
+    this._recentRxChunks.push(copy);
+    if (this._recentRxChunks.length > 16) {
+      this._recentRxChunks.shift();
+    }
   }
 
   releaseLock() { this._reader.releaseLock(); }
@@ -333,6 +362,39 @@ async function cprdClearInputBuffer(acc, options = {}) {
   }
 
   console.log('[CPRD] input drain complete', { label, drained });
+}
+
+async function cprdObserveIncoming(acc, options = {}) {
+  const {
+    idleMs = CPRD_DRAIN_IDLE_MS,
+    label = 'observe',
+  } = options;
+
+  const chunks = [];
+  while (true) {
+    const chunk = await acc.readSome({
+      timeoutMs: idleMs,
+      timeoutLabel: `${label} observe`,
+      suppressTimeoutLog: true,
+    });
+    if (!chunk || chunk.length === 0) break;
+    chunks.push(chunk);
+    cprdLogRaw('OBSERVE', chunk, label);
+  }
+
+  if (chunks.length > 0) {
+    const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    }
+    acc.prependPending(merged);
+    console.log('[CPRD] observe complete', { label, chunks: chunks.length, bytes: total, preserved: true });
+  } else {
+    console.log('[CPRD] observe complete', { label, chunks: 0, bytes: 0, preserved: true });
+  }
 }
 
 function cprdDecodeCString(bytes, offset, len) {
@@ -503,37 +565,45 @@ async function cprdPrimeRadioConnection(writer, acc, { stealth = false } = {}) {
 
   await cprdWriteBytes(writer, new Uint8Array([CPRD_CMD_BYTE, 0xFE]), 'init 0xFE');
   await cprdDelay(CPRD_INIT_SETTLE_MS);
-  await cprdClearInputBuffer(acc, { label: 'post-0xFE' });
+  await cprdClearInputBuffer(acc, { label: 'after C FE' });
 
   await cprdWriteBytes(writer, new Uint8Array([CPRD_CMD_BYTE, initByte]), `init 0x${initByte.toString(16).toUpperCase().padStart(2, '0')}`);
   await cprdDelay(CPRD_INIT_SETTLE_MS);
-  await cprdClearInputBuffer(acc, { label: 'post-connect' });
+  await cprdObserveIncoming(acc, { label: 'after C 00' });
 }
 
 async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
   const req = new Uint8Array(8);
   req[0] = CPRD_READ_BYTE;
   req[1] = CPRD_MODE_READ_RADIO_INFO;
+  console.log('[CPRD] radio info request bytes', { hex: cprdHexAll(req) });
   await cprdWriteBytes(writer, req, 'radio info request');
+  await cprdObserveIncoming(acc, { label: 'after radio info request' });
 
-  const status = await acc.readExact(1, {
-    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-    timeoutLabel: 'radio info status byte',
-  });
-  if (status[0] !== CPRD_READ_BYTE) {
-    throw new Error('Radio info read failed.');
+  try {
+    const status = await acc.readExact(1, {
+      timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+      timeoutLabel: 'radio info status byte',
+    });
+    if (status[0] !== CPRD_READ_BYTE) {
+      throw new Error(`Radio info read failed. Status=${cprdHexAll(status)}.`);
+    }
+    const lenBytes = await acc.readExact(2, {
+      timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+      timeoutLabel: 'radio info length bytes',
+    });
+    const len = (lenBytes[0] << 8) | lenBytes[1];
+    const payload = await acc.readExact(len, {
+      timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+      timeoutLabel: 'radio info payload',
+    });
+
+    return cprdParseRadioInfo(payload);
+  } catch (err) {
+    const recentHex = acc.getRecentRxHex(96);
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`${message} Last RX=${recentHex}.`);
   }
-  const lenBytes = await acc.readExact(2, {
-    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-    timeoutLabel: 'radio info length bytes',
-  });
-  const len = (lenBytes[0] << 8) | lenBytes[1];
-  const payload = await acc.readExact(len, {
-    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-    timeoutLabel: 'radio info payload',
-  });
-
-  return cprdParseRadioInfo(payload);
 }
 
 async function cprdBeginCodeplugReadTask(writer, acc) {
