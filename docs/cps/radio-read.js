@@ -17,7 +17,7 @@
 // Raw range dump is still available for targeted inspection, but the new
 // cpreadReadCodeplug() path now mirrors the original OpenGD77 CPS segment map.
 
-const CPRD_VERSION        = 'radio-read.js 2026-04-29 serial-proto-v1';
+const CPRD_VERSION        = 'radio-read.js 2026-04-29 serial-proto-v3';
 const CPRD_SERIAL_FILTERS = [{ usbVendorId: 0x1FC9, usbProductId: 0x0094 }];
 const CPRD_MAX_CHUNK      = 2045; // firmware-side request cap
 const CPRD_MAX_RETRIES    = 0;    // keep pressure low; no hammering
@@ -216,6 +216,43 @@ function cprdHexBytes(data, count = 8) {
   return Array.from(bytes.subarray(0, count), b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
 }
 
+function cprdHexTailBytes(data, count = 8) {
+  if (!data) return '(none)';
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const start = Math.max(0, bytes.length - count);
+  return Array.from(bytes.subarray(start), b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+}
+
+function cprdFnv1a32(data) {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  let hash = 0x811C9DC5;
+  for (const b of bytes) {
+    hash ^= b;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `0x${hash.toString(16).toUpperCase().padStart(8, '0')}`;
+}
+
+function cprdLogBlockSummary(area, address, data, label = 'block summary') {
+  console.log(`[CPRD] ${label}`, {
+    area,
+    address: `0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
+    length: data.length,
+    fnv1a32: cprdFnv1a32(data),
+    first8: cprdHexBytes(data, 8),
+    last8: cprdHexTailBytes(data, 8),
+  });
+}
+
+function cprdLogBufferSummary(data, label = 'buffer summary') {
+  console.log(`[CPRD] ${label}`, {
+    length: data.length,
+    fnv1a32: cprdFnv1a32(data),
+    first8: cprdHexBytes(data, 8),
+    last8: cprdHexTailBytes(data, 8),
+  });
+}
+
 function cprdConcatBytes(...parts) {
   const filtered = parts.filter(part => part && part.length > 0);
   const total = filtered.reduce((sum, part) => sum + part.length, 0);
@@ -272,6 +309,7 @@ class SerialAccumulator {
 
   async readExact(n, options = {}) {
     const { timeoutMs = 0, timeoutLabel = '' } = options;
+    const initialPendingLength = this._pending.length;
     while (this._pending.length < n) {
       let result;
       if (timeoutMs > 0) {
@@ -282,9 +320,11 @@ class SerialAccumulator {
         ]);
         if (result === timeoutToken) {
           const label = timeoutLabel || `${n} serial byte(s)`;
-          console.warn('[CPRD] timeout stage', { label, timeoutMs });
+          const actual = Math.min(n, this._pending.length) - Math.min(n, initialPendingLength);
+          const expected = n - Math.min(n, initialPendingLength);
+          console.warn('[CPRD] timeout stage', { label, timeoutMs, expectedBytes: expected, actualBytes: actual });
           try { await this._reader.cancel(); } catch (_) {}
-          throw new Error(`Timed out waiting for ${label}.`);
+          throw new Error(`Timed out waiting for ${label}. Expected ${expected} byte(s), received ${actual} byte(s) before timeout.`);
         }
       } else {
         result = await this._reader.read();
@@ -711,91 +751,56 @@ async function cprdRequest(writer, acc, area, address, length, interReadDelayMs)
   req[6] = (length  >>>  8) & 0xFF;
   req[7] =  length          & 0xFF;
   await cprdWriteBytes(writer, req, `read area=${area} addr=0x${address.toString(16).toUpperCase().padStart(5, '0')} len=0x${length.toString(16).toUpperCase()}`);
-
-  const firstChunk = await acc.readSome({
-    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-    timeoutLabel: `read response 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
-  });
-  if (!firstChunk || firstChunk.length === 0) return null;
-
-  let raw = firstChunk;
-  while (true) {
-    const extraChunk = await acc.readSome({
-      timeoutMs: CPRD_DRAIN_IDLE_MS,
-      timeoutLabel: `read extra 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
-      suppressTimeoutLog: true,
+  const addrHex = `0x${address.toString(16).toUpperCase().padStart(5, '0')}`;
+  try {
+    const lenBytes = await acc.readExact(2, {
+      timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+      timeoutLabel: `read length prefix ${addrHex}`,
     });
-    if (!extraChunk || extraChunk.length === 0) break;
-    raw = cprdConcatBytes(raw, extraChunk);
-  }
-
-  cprdLogReadResponseDiagnostics(raw, address, length, `read response diagnostics addr=0x${address.toString(16).toUpperCase().padStart(5, '0')}`);
-
-  if (raw[0] === CPRD_READ_BYTE) {
-    if (raw.length < 3) {
-      const extra = await acc.readExact(3 - raw.length, {
-        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-        timeoutLabel: `read framed header completion 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
-      });
-      raw = cprdConcatBytes(raw, extra);
+    const respLen = (lenBytes[0] << 8) | lenBytes[1];
+    if (respLen !== length) {
+      cprdLogReadResponseDiagnostics(lenBytes, address, length, `read response header mismatch addr=${addrHex}`);
+      throw new Error(
+        `Read length prefix mismatch at area=${area} addr=${addrHex}. ` +
+        `Expected 2-byte BE length ${length}, received ${respLen}.`
+      );
     }
-
-    const respLen = (raw[1] << 8) | raw[2];
-    const totalNeeded = 3 + respLen;
-    if (raw.length < totalNeeded) {
-      const extra = await acc.readExact(totalNeeded - raw.length, {
-        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-        timeoutLabel: `read framed payload completion 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
-      });
-      raw = cprdConcatBytes(raw, extra);
-      cprdLogReadResponseDiagnostics(raw, address, length, `read response complete addr=0x${address.toString(16).toUpperCase().padStart(5, '0')}`);
-    }
-    return raw.subarray(3, 3 + respLen);
+    const payload = await acc.readExact(respLen, {
+      timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+      timeoutLabel: `read payload ${addrHex}`,
+    });
+    cprdLogReadResponseDiagnostics(
+      cprdConcatBytes(lenBytes, payload),
+      address,
+      length,
+      `read response complete addr=${addrHex}`
+    );
+    return payload;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`${message} Last RX=${acc.getRecentRxHex(96)}.`);
   }
-
-  if (raw.length >= 2) {
-    const len16be = (raw[0] << 8) | raw[1];
-    const len16le = raw[0] | (raw[1] << 8);
-    if (len16be === length || len16le === length) {
-      const prefixLen = 2;
-      const totalNeeded = prefixLen + length;
-      if (raw.length < totalNeeded) {
-        const extra = await acc.readExact(totalNeeded - raw.length, {
-          timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-          timeoutLabel: `read raw payload completion 0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
-        });
-        raw = cprdConcatBytes(raw, extra);
-        cprdLogReadResponseDiagnostics(raw, address, length, `read response complete addr=0x${address.toString(16).toUpperCase().padStart(5, '0')}`);
-      }
-      return raw.subarray(prefixLen, prefixLen + length);
-    }
-  }
-
-  console.warn('[CPRD] unrecognized read response framing; storing raw bytes', {
-    address: `0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
-    requestedLength: length,
-    rawLength: raw.length,
-  });
-
-  const fallback = new Uint8Array(length);
-  fallback.fill(0xFF);
-  fallback.set(raw.subarray(0, Math.min(length, raw.length)), 0);
-  return fallback;
 }
 
 async function cprdReadChunk(writer, acc, area, address, length, interReadDelayMs) {
   for (let attempt = 0; attempt <= CPRD_MAX_RETRIES; attempt++) {
     const data = await cprdRequest(writer, acc, area, address, length, interReadDelayMs);
     if (data) {
-      const sliced = data.subarray(0, length);
+      if (data.length !== length) {
+        throw new Error(
+          `Read payload length mismatch at area=${area} addr=0x${address.toString(16).toUpperCase().padStart(5, '0')}. ` +
+          `Expected ${length} byte(s), received ${data.length}.`
+        );
+      }
       console.debug('[CPRD] response', {
         version: CPRD_VERSION,
         area,
         address: `0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
         length: `0x${length.toString(16).toUpperCase()}`,
-        first8: cprdHexBytes(sliced, 8),
+        first8: cprdHexBytes(data, 8),
       });
-      return sliced;
+      cprdLogBlockSummary(area, address, data);
+      return data;
     }
   }
   console.debug('[CPRD] response', {
@@ -870,6 +875,7 @@ async function cpreadReadCodeplug(onProgress, options = {}) {
       }
     }
 
+    cprdLogBufferSummary(out, 'codeplug summary');
     return {
       ok: true,
       buffer: out.buffer,
@@ -879,6 +885,7 @@ async function cpreadReadCodeplug(onProgress, options = {}) {
         chunkSize,
         interReadDelayMs,
         totalBytes,
+        codeplugFnv1a32: cprdFnv1a32(out),
         radioInfo,
       },
     };
