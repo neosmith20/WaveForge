@@ -52,10 +52,9 @@
       <input type="file" id="file-input" accept=".g77,.cdmr" hidden>
       <button class="btn-sm btn-sm-outline" id="new-btn" type="button">New Codeplug</button>
       <button class="btn-sm btn-sm-outline" id="open-btn" type="button">Open .g77 / .cdmr</button>
-      <button class="btn-sm btn-sm-read" id="read-btn" type="button">Read from Radio</button>
+      <button class="btn-sm btn-sm-read" id="read-btn" type="button">Raw Range Dump</button>
       <button class="btn-sm btn-sm-primary" id="save-btn" type="button" disabled>Save .cdmr</button>
       <button class="btn-sm btn-sm-write" id="write-btn" type="button" disabled>Write to Radio</button>
-      <button class="btn-sm btn-sm-outline" id="dump-btn" type="button" style="display:none">&#x2699; Raw Dump</button>
     </div>
   </div>
 
@@ -96,7 +95,7 @@
              or use one of the options below.</p>
           <div class="drop-zone-btns">
             <button class="btn-sm btn-sm-outline" id="drop-open-btn" type="button">Choose file&hellip;</button>
-            <button class="btn-sm btn-sm-read" id="drop-read-btn" type="button">Read from Radio&hellip;</button>
+            <button class="btn-sm btn-sm-read" id="drop-read-btn" type="button">Raw Range Dump&hellip;</button>
           </div>
           <p class="file-types">Supported: .g77 (OpenGD77) &bull; .cdmr (ClearDMR)</p>
         </div>
@@ -527,27 +526,68 @@
     </div>
   </dialog>
 
-  <!-- Read from Radio modal -->
+  <!-- Raw Range Dump modal -->
   <dialog id="read-modal" class="write-modal">
     <div class="modal-header">
-      <h3>Read from Radio</h3>
+      <h3>Raw Range Dump</h3>
       <button class="modal-close" id="read-modal-close" type="button" aria-label="Close">&times;</button>
     </div>
     <div class="modal-body">
       <p class="section-desc">
-        Reads the codeplug from the connected radio into the CPS editor via USB.
-        The radio must be <strong>powered on normally</strong> &mdash; do <strong>not</strong> enter DFU mode.
+        Reads a raw byte range from the radio's CPS address space and downloads it directly.
+        No parsing, no address translation, and no synthetic codeplug reconstruction.
       </p>
       <div class="write-dfu-steps">
         <ol>
           <li>Power on the radio normally (do <strong>not</strong> hold PTT&nbsp;+&nbsp;SK1).</li>
           <li>Connect the USB cable to your computer.</li>
-          <li>Click <strong>Connect &amp; Read</strong> and select your radio from the list.</li>
+          <li>Choose a preset or enter area/start/length/chunk/delay manually.</li>
+          <li>Click <strong>Connect &amp; Dump</strong> and select your radio from the list.</li>
         </ol>
       </div>
       <div class="write-note">
-        Web Serial requires Chrome, Edge, or another Chromium-based browser.
-        Firefox and Safari are not supported.
+        Conservative defaults are recommended. The dump stops on the first failed chunk.
+        If any bytes were collected, a partial dump is still downloaded.
+      </div>
+      <div class="field-group">
+        <div class="field-row">
+          <span class="field-label">Presets</span>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
+              data-area="1" data-start="0x00000" data-length="0x10000" data-chunk="0x10" data-delay="15">Flash 0x00000-0x0FFFF</button>
+            <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
+              data-area="1" data-start="0xA0000" data-length="0x10000" data-chunk="0x10" data-delay="15">Flash 0xA0000-0xAFFFF</button>
+            <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
+              data-area="2" data-start="0x00000" data-length="0x08000" data-chunk="0x10" data-delay="15">EEPROM 0x00000-0x07FFF</button>
+            <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
+              data-area="1" data-start="0x08000" data-length="0x3000" data-chunk="0x10" data-delay="15">Zones likely</button>
+            <button class="btn-sm btn-sm-outline raw-preset-btn" type="button"
+              data-area="1" data-start="0xA7600" data-length="0x7000" data-chunk="0x10" data-delay="15">Contacts likely</button>
+          </div>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Area</span>
+          <select id="raw-area" class="field-select">
+            <option value="1">1</option>
+            <option value="2">2</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Start Address</span>
+          <input type="text" id="raw-start" class="field-input" value="0x00000" spellcheck="false">
+        </div>
+        <div class="field-row">
+          <span class="field-label">Length</span>
+          <input type="text" id="raw-length" class="field-input" value="0x10000" spellcheck="false">
+        </div>
+        <div class="field-row">
+          <span class="field-label">Chunk Size</span>
+          <input type="text" id="raw-chunk" class="field-input" value="0x10" spellcheck="false">
+        </div>
+        <div class="field-row">
+          <span class="field-label">Inter-read Delay</span>
+          <input type="number" id="raw-delay" min="0" step="1" class="field-input" value="15">
+        </div>
       </div>
       <div class="write-progress-wrap" id="read-progress-wrap">
         <div class="write-progress-bar">
@@ -560,33 +600,7 @@
     <div class="write-footer">
       <div class="modal-spacer"></div>
       <button class="btn-sm btn-sm-outline" id="read-cancel-btn" type="button">Close</button>
-      <button class="btn-sm btn-sm-read" id="read-connect-btn" type="button">Connect &amp; Read</button>
-    </div>
-  </dialog>
-
-  <!-- Debug: raw memory dump (visible at index.html#debug) -->
-  <dialog id="dump-modal" class="write-modal">
-    <div class="modal-header">
-      <h3>Raw Codeplug Dump</h3>
-      <button class="modal-close" id="dump-modal-close" type="button" aria-label="Close">&times;</button>
-    </div>
-    <div class="modal-body">
-      <p class="section-desc" style="color:#c00;font-family:monospace;font-size:0.85em">
-        DEBUG — reads 128 KB raw (EEPROM 0x00000&ndash;0x0FFFF + Flash 0x80000&ndash;0x8FFFF)
-        and downloads as .bin. No parsing. ~26 s. Do not disconnect during dump.
-      </p>
-      <div class="write-progress-wrap" id="dump-progress-wrap">
-        <div class="write-progress-bar">
-          <div class="write-progress-fill" id="dump-progress-fill"></div>
-        </div>
-        <div class="write-progress-label" id="dump-progress-label">0%</div>
-      </div>
-      <p class="write-status" id="dump-status"></p>
-    </div>
-    <div class="write-footer">
-      <div class="modal-spacer"></div>
-      <button class="btn-sm btn-sm-outline" id="dump-cancel-btn" type="button">Close</button>
-      <button class="btn-sm btn-sm-read"    id="dump-connect-btn" type="button">Connect &amp; Dump</button>
+      <button class="btn-sm btn-sm-read" id="read-connect-btn" type="button">Connect &amp; Dump</button>
     </div>
   </dialog>
 
@@ -706,7 +720,6 @@
 
   <script src="radio-read.js"></script>
   <script src="radio-write.js"></script>
-  <script src="radio-dump.js"></script>
   <script src="cps.js"></script>
   <script>
   'use strict';
@@ -1941,7 +1954,7 @@
     setTimeout(() => { blSave.textContent = orig; }, 1500);
   });
 
-  // ── Read from Radio ────────────────────────────────────────────────────────
+  // ── Raw Range Dump ────────────────────────────────────────────────────────
 
   const readBtn          = document.getElementById('read-btn');
   const dropReadBtn      = document.getElementById('drop-read-btn');
@@ -1953,6 +1966,42 @@
   const readProgressWrap = document.getElementById('read-progress-wrap');
   const readProgressFill = document.getElementById('read-progress-fill');
   const readProgressLbl  = document.getElementById('read-progress-label');
+  const rawAreaEl        = document.getElementById('raw-area');
+  const rawStartEl       = document.getElementById('raw-start');
+  const rawLengthEl      = document.getElementById('raw-length');
+  const rawChunkEl       = document.getElementById('raw-chunk');
+  const rawDelayEl       = document.getElementById('raw-delay');
+  const rawPresetBtns    = [...document.querySelectorAll('.raw-preset-btn')];
+
+  function applyRawPreset({ area, start, length, chunk, delay }) {
+    rawAreaEl.value   = String(area);
+    rawStartEl.value  = start;
+    rawLengthEl.value = length;
+    rawChunkEl.value  = chunk;
+    rawDelayEl.value  = String(delay);
+  }
+
+  function parseHexInput(value, label) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) throw new Error(`${label} is required.`);
+    const normalized = /^0x/i.test(trimmed) ? trimmed : `0x${trimmed}`;
+    const parsed = Number.parseInt(normalized, 16);
+    if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`${label} must be a hex value.`);
+    return parsed >>> 0;
+  }
+
+  function makeDumpStamp() {
+    return new Date().toISOString().replace(/[:\-]/g, '').replace('T', '_').slice(0, 15);
+  }
+
+  function downloadBlob(filename, blob) {
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
   function openReadModal() {
     readStatusEl.textContent  = '';
@@ -1971,6 +2020,14 @@
     readStatusEl.className   = 'write-status' + (cls ? ' ' + cls : '');
   }
 
+  rawPresetBtns.forEach(btn => btn.addEventListener('click', () => applyRawPreset({
+    area: btn.dataset.area,
+    start: btn.dataset.start,
+    length: btn.dataset.length,
+    chunk: btn.dataset.chunk,
+    delay: btn.dataset.delay,
+  })));
+
   readBtn.addEventListener('click',        openReadModal);
   dropReadBtn.addEventListener('click',    openReadModal);
   readModalClose.addEventListener('click', closeReadModal);
@@ -1985,103 +2042,74 @@
     setReadStatus('Connecting…', 'muted');
 
     try {
-      const buf = await cpwrReadCodeplug(({ pct, msg }) => {
+      const params = {
+        area: Number(rawAreaEl.value),
+        start: parseHexInput(rawStartEl.value, 'Start address'),
+        length: parseHexInput(rawLengthEl.value, 'Length'),
+        chunkSize: parseHexInput(rawChunkEl.value, 'Chunk size'),
+        interReadDelayMs: Number.parseInt(rawDelayEl.value, 10),
+      };
+      if (!Number.isFinite(params.interReadDelayMs) || params.interReadDelayMs < 0) {
+        throw new Error('Inter-read delay must be 0 or greater.');
+      }
+
+      const result = await cprawDumpRange(params, ({ pct, msg }) => {
         readProgressFill.style.width  = `${pct}%`;
         readProgressLbl.textContent   = `${pct}%`;
         setReadStatus(msg || '', 'muted');
       });
-      readProgressFill.style.width  = '100%';
-      readProgressLbl.textContent   = '100%';
-      setReadStatus('Read complete.', 'ok');
 
-      codeplug          = new CodeplugParser(buf);
-      codeplug.filename = 'radio_read.cdmr';
-      closeReadModal();
-      renderAll();
+      const stamp = makeDumpStamp();
+      const areaPart = `area${params.area}`;
+      const startPart = `start${params.start.toString(16).toUpperCase().padStart(5, '0')}`;
+      const lengthPart = `len${params.length.toString(16).toUpperCase()}`;
+      const chunkPart = `chunk${params.chunkSize.toString(16).toUpperCase()}`;
+      const delayPart = `delay${params.interReadDelayMs}`;
+      const baseName = `rawdump_${areaPart}_${startPart}_${lengthPart}_${chunkPart}_${delayPart}_${stamp}`;
+
+      if (result.bytesRead > 0) {
+        downloadBlob(`${baseName}.bin`, new Blob([result.buffer], { type: 'application/octet-stream' }));
+        const metaText = [
+          `area=${params.area}`,
+          `start=0x${params.start.toString(16).toUpperCase().padStart(5, '0')}`,
+          `length=0x${params.length.toString(16).toUpperCase()}`,
+          `chunk=0x${params.chunkSize.toString(16).toUpperCase()}`,
+          `delay_ms=${params.interReadDelayMs}`,
+          `bytes_read=0x${result.bytesRead.toString(16).toUpperCase()}`,
+          `complete=${result.complete ? 'yes' : 'no'}`,
+          result.failedAt
+            ? `failed_at=0x${result.failedAt.address.toString(16).toUpperCase().padStart(5, '0')}`
+            : 'failed_at=none',
+          result.errorMessage ? `error=${result.errorMessage}` : 'error=none',
+        ].join('\n') + '\n';
+        downloadBlob(`${baseName}.txt`, new Blob([metaText], { type: 'text/plain;charset=utf-8' }));
+      }
+
+      readProgressFill.style.width = `${Math.round((result.bytesRead / Math.max(result.requestedLength, 1)) * 100)}%`;
+      readProgressLbl.textContent  = `${Math.round((result.bytesRead / Math.max(result.requestedLength, 1)) * 100)}%`;
+
+      if (result.complete) {
+        setReadStatus(`Saved ${baseName}.bin`, 'ok');
+      } else if (result.bytesRead > 0) {
+        setReadStatus(
+          `Saved partial dump ${baseName}.bin (${result.bytesRead}/${result.requestedLength} bytes). ` +
+          `${result.errorMessage || 'Stopped on first failed chunk.'}`,
+          'warn'
+        );
+      } else {
+        setReadStatus(result.errorMessage || 'Dump failed before any bytes were read.', 'err');
+      }
     } catch (err) {
       if (err.name === 'NotFoundError') {
         setReadStatus('No device selected.', 'muted');
       } else {
-        setReadStatus(`Read failed: ${err.message}`, 'err');
+        setReadStatus(`Dump failed: ${err.message}`, 'err');
       }
       readConnectBtn.disabled = false;
+      return;
     }
-  });
 
-  // ── Debug: Raw Dump (index.html#debug) ────────────────────────────────────
-
-  const dumpBtn          = document.getElementById('dump-btn');
-  const dumpModal        = document.getElementById('dump-modal');
-  const dumpModalClose   = document.getElementById('dump-modal-close');
-  const dumpCancelBtn    = document.getElementById('dump-cancel-btn');
-  const dumpConnectBtn   = document.getElementById('dump-connect-btn');
-  const dumpStatusEl     = document.getElementById('dump-status');
-  const dumpProgressWrap = document.getElementById('dump-progress-wrap');
-  const dumpProgressFill = document.getElementById('dump-progress-fill');
-  const dumpProgressLbl  = document.getElementById('dump-progress-label');
-
-  function applyDumpVisibility() {
-    dumpBtn.style.display = (window.location.hash === '#debug') ? '' : 'none';
-  }
-  applyDumpVisibility();
-  window.addEventListener('hashchange', applyDumpVisibility);
-
-  dumpBtn.addEventListener('click', () => {
-    dumpStatusEl.textContent  = '';
-    dumpStatusEl.className    = 'write-status';
-    dumpProgressWrap.classList.remove('visible');
-    dumpProgressFill.style.width = '0%';
-    dumpProgressLbl.textContent  = '0%';
-    dumpConnectBtn.disabled = false;
-    dumpModal.showModal();
-  });
-
-  dumpModalClose.addEventListener('click', () => dumpModal.close());
-  dumpCancelBtn.addEventListener('click',  () => dumpModal.close());
-  dumpModal.addEventListener('click', e => { if (e.target === dumpModal) dumpModal.close(); });
-
-  dumpConnectBtn.addEventListener('click', async () => {
-    dumpConnectBtn.disabled = true;
-    dumpProgressWrap.classList.add('visible');
-    dumpProgressFill.style.width = '0%';
-    dumpProgressLbl.textContent  = '0%';
-    dumpStatusEl.textContent = 'Connecting…';
-    dumpStatusEl.className   = 'write-status muted';
-
-    try {
-      const { buffer, failedChunks } = await cpwrDumpCodeplug(({ pct, msg }) => {
-        dumpProgressFill.style.width = `${pct}%`;
-        dumpProgressLbl.textContent  = `${pct}%`;
-        dumpStatusEl.textContent = msg || '';
-        dumpStatusEl.className   = 'write-status muted';
-      });
-
-      const ts    = new Date().toISOString().replace(/[:\-]/g, '').replace('T', '_').slice(0, 15);
-      const fname = `codeplug_dump_${ts}.bin`;
-      const blob  = new Blob([buffer], { type: 'application/octet-stream' });
-      const url   = URL.createObjectURL(blob);
-      const a     = Object.assign(document.createElement('a'), { href: url, download: fname });
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      dumpProgressFill.style.width = '100%';
-      dumpProgressLbl.textContent  = '100%';
-      const failNote = failedChunks.length
-        ? ` (${failedChunks.length} chunk(s) failed: ${failedChunks.slice(0, 3).join(', ')}${failedChunks.length > 3 ? '…' : ''})`
-        : '';
-      dumpStatusEl.textContent = `Saved ${fname}${failNote}`;
-      dumpStatusEl.className   = failedChunks.length ? 'write-status warn' : 'write-status ok';
-      dumpConnectBtn.disabled  = false;
-
-    } catch (err) {
-      dumpStatusEl.textContent = err.name === 'NotFoundError'
-        ? 'No device selected.'
-        : `Dump failed: ${err.message}`;
-      dumpStatusEl.className  = err.name === 'NotFoundError' ? 'write-status muted' : 'write-status err';
-      dumpConnectBtn.disabled = false;
-    }
+    readConnectBtn.disabled = false;
   });
 
   </script>
