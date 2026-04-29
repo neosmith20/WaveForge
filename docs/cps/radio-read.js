@@ -30,6 +30,7 @@ const CPRD_MODE_READ_EEPROM     = 0x02;
 const CPRD_MODE_READ_RADIO_INFO = 0x09;
 const CPRD_BUFFER_DATE_CUTOFF   = 20211002;
 const CPRD_STM32_RADIO_TYPES    = new Set([5, 6, 7, 8, 9, 10]);
+const CPRD_CONNECT_TIMEOUT_MS   = 1000;
 const CPRD_CODEPLUG_SEGMENTS = [
   { fileStart: 0x00080, fileEnd: 0x06000, area: 1, radioStart: 0x00080, label: 'Codeplug block 1' },
   { fileStart: 0x06000, fileEnd: 0x0604A, area: 1, radioStart: 0x06000, label: 'Last used channels' },
@@ -204,9 +205,27 @@ class SerialAccumulator {
     this._pending = new Uint8Array(0);
   }
 
-  async readExact(n) {
+  async readExact(n, options = {}) {
+    const { timeoutMs = 0, timeoutLabel = '' } = options;
     while (this._pending.length < n) {
-      const { value, done } = await this._reader.read();
+      let result;
+      if (timeoutMs > 0) {
+        const timeoutToken = Symbol('timeout');
+        result = await Promise.race([
+          this._reader.read(),
+          cprdDelay(timeoutMs).then(() => timeoutToken),
+        ]);
+        if (result === timeoutToken) {
+          const label = timeoutLabel || `${n} serial byte(s)`;
+          console.warn('[CPRD] timeout stage', { label, timeoutMs });
+          try { await this._reader.cancel(); } catch (_) {}
+          throw new Error(`Timed out waiting for ${label}.`);
+        }
+      } else {
+        result = await this._reader.read();
+      }
+
+      const { value, done } = result;
       if (done) throw new Error('Serial port closed unexpectedly.');
       const chunk = value instanceof Uint8Array
         ? value
@@ -269,6 +288,9 @@ async function cprdSendCommand(writer, acc, commandNumber, options = {}) {
     message = '',
     fatal = true,
     context = '',
+    timeoutMs = 0,
+    logTx = false,
+    logAck = false,
   } = options;
 
   const req = new Uint8Array(32);
@@ -289,22 +311,27 @@ async function cprdSendCommand(writer, acc, commandNumber, options = {}) {
     len = 3;
   }
 
+  const txHex = Array.from(req.subarray(0, len), b => `0x${b.toString(16).toUpperCase().padStart(2, '0')}`);
   const session = writer && writer.__cprdSession;
-  if (session && session.commandCount === 0) {
-    console.log('[CPRD] first command bytes sent', {
+  if (logTx || (session && session.commandCount === 0)) {
+    console.log(session && session.commandCount === 0 ? '[CPRD] first command bytes sent' : '[CPRD] command bytes sent', {
       command: `0x${commandNumber.toString(16).toUpperCase()}`,
-      bytes: Array.from(req.subarray(0, len), b => `0x${b.toString(16).toUpperCase().padStart(2, '0')}`),
+      bytes: txHex,
       context: context || undefined,
     });
   }
   await writer.write(req.subarray(0, len));
   // Native CPS waits for pending writes to clear and then sleeps 50 ms.
   await cprdDelay(50);
-  const ack = await acc.readExact(2);
-  if (session && session.commandCount === 0) {
-    console.log('[CPRD] first ack bytes received', {
+  const ack = await acc.readExact(2, {
+    timeoutMs,
+    timeoutLabel: context ? `${context} ack` : `command 0x${commandNumber.toString(16).toUpperCase()} ack`,
+  });
+  const ackHexList = Array.from(ack, b => `0x${b.toString(16).toUpperCase().padStart(2, '0')}`);
+  if (logAck || (session && session.commandCount === 0)) {
+    console.log(session && session.commandCount === 0 ? '[CPRD] first ack bytes received' : '[CPRD] raw ack bytes received', {
       command: `0x${commandNumber.toString(16).toUpperCase()}`,
-      ack: Array.from(ack, b => `0x${b.toString(16).toUpperCase().padStart(2, '0')}`),
+      ack: ackHexList,
       context: context || undefined,
     });
   }
@@ -331,40 +358,63 @@ async function cprdPrimeRadioConnection(writer, acc, { stealth = false } = {}) {
   // 1. sendCommand(..., 254) and ignore the result
   // 2. DiscardInBuffer()
   // 3. sendCommand(..., stealth ? 254 : 0) and hard-fail if rejected
-  await cprdSendPreambleCommand(writer, acc, 0xFE, { context: 'probe preamble 0xFE' });
+  console.log('[CPRD] first command sent', { command: '0xFE', context: 'probe preamble 0xFE' });
+  await cprdSendPreambleCommand(writer, acc, 0xFE, {
+    context: 'probe preamble 0xFE',
+    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+    logAck: true,
+  });
   await acc.drainQuiet(50);
+  console.log('[CPRD] second command sent', {
+    command: stealth ? '0xFE' : '0x00',
+    context: stealth ? 'probe stealth handshake 0xFE' : 'connect/entry handshake',
+  });
   await cprdSendCommand(writer, acc, stealth ? 0xFE : 0x00, {
     context: stealth ? 'probe stealth handshake 0xFE' : 'connect/entry handshake',
+    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+    logAck: true,
   });
 }
 
 async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
   if (!stealth) {
-    await cprdSendPreambleCommand(writer, acc, 0, { context: 'radio info preamble 0x0' });
-    await cprdSendPreambleCommand(writer, acc, 1, { context: 'radio info preamble 0x1' });
-    await cprdSendPreambleCommand(writer, acc, 2, { y: 0,  size: 3, alignment: 1, message: 'CPS', context: 'radio info title line 1' });
-    await cprdSendPreambleCommand(writer, acc, 2, { y: 16, size: 3, alignment: 1, message: 'Read', context: 'radio info title line 2' });
-    await cprdSendPreambleCommand(writer, acc, 2, { y: 32, size: 3, alignment: 1, message: 'Radio', context: 'radio info title line 3' });
-    await cprdSendPreambleCommand(writer, acc, 2, { y: 48, size: 3, alignment: 1, message: 'Info', context: 'radio info title line 4' });
-    await cprdSendPreambleCommand(writer, acc, 3, { context: 'radio info display refresh' });
-    await cprdSendPreambleCommand(writer, acc, 6, { xOrOption: 4, context: 'radio info status mode' });
+    await cprdSendPreambleCommand(writer, acc, 0, { context: 'radio info preamble 0x0', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
+    await cprdSendPreambleCommand(writer, acc, 1, { context: 'radio info preamble 0x1', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
+    await cprdSendPreambleCommand(writer, acc, 2, { y: 0,  size: 3, alignment: 1, message: 'CPS', context: 'radio info title line 1', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
+    await cprdSendPreambleCommand(writer, acc, 2, { y: 16, size: 3, alignment: 1, message: 'Read', context: 'radio info title line 2', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
+    await cprdSendPreambleCommand(writer, acc, 2, { y: 32, size: 3, alignment: 1, message: 'Radio', context: 'radio info title line 3', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
+    await cprdSendPreambleCommand(writer, acc, 2, { y: 48, size: 3, alignment: 1, message: 'Info', context: 'radio info title line 4', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
+    await cprdSendPreambleCommand(writer, acc, 3, { context: 'radio info display refresh', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
+    await cprdSendPreambleCommand(writer, acc, 6, { xOrOption: 4, context: 'radio info status mode', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
   }
 
   const req = new Uint8Array(8);
   req[0] = CPRD_READ_BYTE;
   req[1] = CPRD_MODE_READ_RADIO_INFO;
+  console.log('[CPRD] radio info request sent', {
+    bytes: Array.from(req, b => `0x${b.toString(16).toUpperCase().padStart(2, '0')}`),
+  });
   await writer.write(req);
 
-  const status = await acc.readExact(1);
+  const status = await acc.readExact(1, {
+    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+    timeoutLabel: 'radio info status byte',
+  });
   if (status[0] !== CPRD_READ_BYTE) {
     throw new Error('Radio info read failed.');
   }
-  const lenBytes = await acc.readExact(2);
+  const lenBytes = await acc.readExact(2, {
+    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+    timeoutLabel: 'radio info length bytes',
+  });
   const len = (lenBytes[0] << 8) | lenBytes[1];
-  const payload = await acc.readExact(len);
+  const payload = await acc.readExact(len, {
+    timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+    timeoutLabel: 'radio info payload',
+  });
 
   if (!stealth) {
-    await cprdSendPreambleCommand(writer, acc, 5, { context: 'radio info teardown' });
+    await cprdSendPreambleCommand(writer, acc, 5, { context: 'radio info teardown', timeoutMs: CPRD_CONNECT_TIMEOUT_MS });
   }
 
   return cprdParseRadioInfo(payload);
