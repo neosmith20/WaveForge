@@ -240,7 +240,9 @@ async function cpwrWriteCodeplug(arrayBuffer, onProgress, options = {}) {
     // Drain any stale bytes from the OS buffer before starting write commands.
     await cpwrDrainBuffer(port);
     cprdClaimSerialSessionIO(session);
+    session.writer.__cprdSession = session;
     const { writer, acc } = session;
+    await cprdPrimeRadioConnection(writer, acc);
     const radioInfo = await cprdReadRadioInfo(writer, acc);
     if (!radioInfo.isSTM32) {
       throw new Error(`Unsupported radio type ${radioInfo.radioType}. This write path is hardened only for STM32-family radios.`);

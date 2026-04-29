@@ -154,13 +154,39 @@ async function cprdOpenSerialSession(filters, tag, options = {}) {
       port: cprdDescribePort(port),
     });
     try {
-      await port.open({ baudRate: 115200 });
+      await port.open({
+        baudRate: 115200,
+        dataBits: 8,
+        stopBits: 1,
+        parity: 'none',
+        bufferSize: 1032,
+        flowControl: 'none',
+      });
+      if (typeof port.setSignals === 'function') {
+        try {
+          await port.setSignals({
+            dataTerminalReady: false,
+            requestToSend: false,
+            break: false,
+          });
+        } catch (signalErr) {
+          console.debug('[CPRD] setSignals not applied', signalErr);
+        }
+      }
+      console.log(`[CPRD] port open success (${tag})`, {
+        port: cprdDescribePort(port),
+        baudRate: 115200,
+        dataBits: 8,
+        stopBits: 1,
+        parity: 'none',
+        flowControl: 'none',
+      });
     } catch (err) {
       throw cprdNormalizeOpenError(err);
     }
   }
 
-  const session = { port, reader: null, writer: null, acc: null, tag };
+  const session = { port, reader: null, writer: null, acc: null, tag, commandCount: 0 };
   CPRD_SERIAL_SESSION_STATE.port = port;
   CPRD_SERIAL_SESSION_STATE.owner = tag;
   return claimIO ? cprdClaimSerialSessionIO(session) : session;
@@ -193,6 +219,14 @@ class SerialAccumulator {
     const out = this._pending.slice(0, n);
     this._pending = this._pending.slice(n);
     return out;
+  }
+
+  clearPending() {
+    this._pending = new Uint8Array(0);
+  }
+
+  async drainQuiet(_idleMs = 50) {
+    this.clearPending();
   }
 
   releaseLock() { this._reader.releaseLock(); }
@@ -255,8 +289,26 @@ async function cprdSendCommand(writer, acc, commandNumber, options = {}) {
     len = 3;
   }
 
+  const session = writer && writer.__cprdSession;
+  if (session && session.commandCount === 0) {
+    console.log('[CPRD] first command bytes sent', {
+      command: `0x${commandNumber.toString(16).toUpperCase()}`,
+      bytes: Array.from(req.subarray(0, len), b => `0x${b.toString(16).toUpperCase().padStart(2, '0')}`),
+      context: context || undefined,
+    });
+  }
   await writer.write(req.subarray(0, len));
+  // Native CPS waits for pending writes to clear and then sleeps 50 ms.
+  await cprdDelay(50);
   const ack = await acc.readExact(2);
+  if (session && session.commandCount === 0) {
+    console.log('[CPRD] first ack bytes received', {
+      command: `0x${commandNumber.toString(16).toUpperCase()}`,
+      ack: Array.from(ack, b => `0x${b.toString(16).toUpperCase().padStart(2, '0')}`),
+      context: context || undefined,
+    });
+  }
+  if (session) session.commandCount++;
   if (ack[1] !== (commandNumber & 0xFF)) {
     const commandHex = `0x${commandNumber.toString(16).toUpperCase()}`;
     const ackHex = cprdHexBytes(ack, 2);
@@ -274,9 +326,21 @@ async function cprdSendPreambleCommand(writer, acc, commandNumber, options = {})
   return cprdSendCommand(writer, acc, commandNumber, { ...options, fatal: false });
 }
 
+async function cprdPrimeRadioConnection(writer, acc, { stealth = false } = {}) {
+  // Decompiled OpenGD77 CPS probe sequence:
+  // 1. sendCommand(..., 254) and ignore the result
+  // 2. DiscardInBuffer()
+  // 3. sendCommand(..., stealth ? 254 : 0) and hard-fail if rejected
+  await cprdSendPreambleCommand(writer, acc, 0xFE, { context: 'probe preamble 0xFE' });
+  await acc.drainQuiet(50);
+  await cprdSendCommand(writer, acc, stealth ? 0xFE : 0x00, {
+    context: stealth ? 'probe stealth handshake 0xFE' : 'connect/entry handshake',
+  });
+}
+
 async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
   if (!stealth) {
-    await cprdSendCommand(writer, acc, 0, { context: 'connect/entry handshake' });
+    await cprdSendPreambleCommand(writer, acc, 0, { context: 'radio info preamble 0x0' });
     await cprdSendPreambleCommand(writer, acc, 1, { context: 'radio info preamble 0x1' });
     await cprdSendPreambleCommand(writer, acc, 2, { y: 0,  size: 3, alignment: 1, message: 'CPS', context: 'radio info title line 1' });
     await cprdSendPreambleCommand(writer, acc, 2, { y: 16, size: 3, alignment: 1, message: 'Read', context: 'radio info title line 2' });
@@ -387,8 +451,10 @@ async function cpreadReadCodeplug(onProgress, options = {}) {
 
   try {
     session = await cprdOpenSerialSession(CPRD_SERIAL_FILTERS, 'cpreadReadCodeplug');
+    session.writer.__cprdSession = session;
     const { writer, acc } = session;
 
+    await cprdPrimeRadioConnection(writer, acc);
     const radioInfo = await cprdReadRadioInfo(writer, acc);
     if (!radioInfo.isSTM32) {
       throw new Error(`Unsupported radio type ${radioInfo.radioType}. This browser CPS path currently matches the STM32-family OpenGD77 CPS model only.`);
@@ -474,6 +540,7 @@ async function cprawDumpRange(options, onProgress) {
 
   try {
     session = await cprdOpenSerialSession(CPRD_SERIAL_FILTERS, 'cprawDumpRange');
+    session.writer.__cprdSession = session;
     const { writer, acc } = session;
 
     for (let offset = 0, chunkIndex = 0; offset < length; offset += chunkSize, chunkIndex++) {
