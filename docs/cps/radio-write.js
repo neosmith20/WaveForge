@@ -41,6 +41,15 @@
 // That behavior comes directly from OpenGD77Form.worker_DoWork(),
 // WriteFlash(), and the STM32 flash-address offset handling in the
 // decompiled OpenGD77 CPS.
+//
+// Final STM32 boot-text result from hardware testing:
+// - Boot-text-only writes must use the same sector overlay flow as production
+//   writes: X 01 prepare, X 02 overlay bytes, X 03 erase/program sector.
+// - Do not use X 04 for STM32 boot text writes. Firmware can ACK X 04 with
+//   [0x58, 0x04] while leaving flash unchanged, which causes verify readback to
+//   show the original text still present.
+// - The boot-text-only helper remains isolated to docs/cps/test.html until
+//   other write paths are proven stable on hardware.
 
 const CPWR_SERIAL_FILTERS = [{ usbVendorId: 0x1FC9, usbProductId: 0x0094 }];
 
@@ -64,7 +73,9 @@ const CPWR_CODEPLUG_SEGMENTS = [
 
 // SerialAccumulator is defined in radio-read.js (loaded first); shared via global scope.
 
-// Send a write request and verify the expected acknowledgement prefix.
+// Send a write request, log the full TX frame, and verify the exact ACK bytes.
+// Bench work for boot text writes depends on seeing both the outgoing X request
+// and the returned ACK pair in the console log.
 async function cpwrRequest(writer, acc, bytes, context, expectedPrefix = [bytes[0], bytes[1]]) {
   await cprdWriteBytes(writer, bytes, context);
   const first = await acc.readExact(1);
@@ -181,6 +192,8 @@ async function cpwrWriteSector(writer, acc, address, writeByte) {
 
 async function cpwrWriteBootTextOverlay(writer, acc, payload, writeByte) {
   // STM32 firmware only commits flash through prepare/send/write sector commands.
+  // This path updates only the 32-byte boot-text window inside the copied 4 KB
+  // sector buffer, then commits that sector back to flash.
   await cpwrPrepareSector(writer, acc, CPWR_BOOT_TEXT_OFFSET, writeByte);
   await cpwrSendData(writer, acc, CPWR_BOOT_TEXT_OFFSET, payload, writeByte);
   await cpwrWriteSector(writer, acc, CPWR_BOOT_TEXT_OFFSET, writeByte);

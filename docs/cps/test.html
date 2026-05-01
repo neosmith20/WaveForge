@@ -104,6 +104,16 @@
       </div>
 
       <div class="section-card">
+        <div class="section-card-header"><h3>Protocol Notes</h3></div>
+        <div class="section-card-body">
+          <p class="test-meta">This page is the only place where the proven boot-text write path is exposed for now. The main CPS page stays read-only until more write paths are hardware-proven.</p>
+          <p class="test-meta">Read path: open the port, clear only buffered accumulator state, then send direct <code>R</code> requests. No <code>C 00</code> or <code>C FE</code> init commands are sent before reads.</p>
+          <p class="test-meta">Read responses: every response is treated as a strict <code>R</code>-framed packet. The reader sync-scans for <code>0x52</code>, logs and discards any pre-sync bytes, then reads the big-endian payload length and exact payload.</p>
+          <p class="test-meta">Boot text write path on STM32: <code>X 01</code> prepare the 4 KB sector containing <code>0x7540</code>, <code>X 02</code> overlay the 32 boot-text bytes, then <code>X 03</code> erase/program the sector. <code>X 04</code> must not be used on STM32 because it can ACK without modifying flash.</p>
+        </div>
+      </div>
+
+      <div class="section-card">
         <div class="section-card-header"><h3>Workflow</h3></div>
         <div class="section-card-body">
           <div class="test-actions">
@@ -120,6 +130,18 @@
             <div class="write-progress-label" id="progress-label">0%</div>
           </div>
           <p class="write-status" id="status"></p>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-card-header"><h3>Test Checklist</h3></div>
+        <div class="section-card-body">
+          <p class="test-meta">1. Read from Radio.</p>
+          <p class="test-meta">2. Save Backup from that same fresh read.</p>
+          <p class="test-meta">3. Change only Line 1 and/or Line 2 using printable ASCII, max 16 chars each.</p>
+          <p class="test-meta">4. Run Write Boot Text Only and wait for the immediate readback verify to pass.</p>
+          <p class="test-meta">5. Run Read Back &amp; Verify, then save a fresh post-write backup if needed.</p>
+          <p class="test-meta">6. Power-cycle the radio and do another fresh read to confirm the text persisted.</p>
         </div>
       </div>
 
@@ -166,6 +188,9 @@
   <script>
   'use strict';
 
+  // Test-page-only boot text workflow. Keep this isolated here until broader
+  // write paths are proven stable on hardware and deliberately integrated into
+  // the main CPS UI.
   const BOOT_TEXT_OFFSET = 0x7540;
   const TEST_BOOT_TEXT_LINE_LEN = 16;
   const TEST_BOOT_TEXT_TOTAL_LEN = 32;

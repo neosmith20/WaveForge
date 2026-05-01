@@ -2,6 +2,20 @@
 
 // ClearDMR Web CPS — Radio Read via USB CDC (normal operating mode)
 //
+// Final working read protocol for STM32-family radios:
+// - Do not send C 00 or C FE before reads. The radio already boots in
+//   USB_MODE_CPS, and bench testing showed the C init commands can suppress the
+//   first real read response.
+// - Send the first real request directly as an R command, starting with radio
+//   info (R 09).
+// - Treat every read response as a strict R-framed packet:
+//     [0]    = 0x52 'R'
+//     [1..2] = payload length, uint16 BE
+//     [3..n] = payload
+// - Read-side framing must sync on 0x52 instead of assuming the first received
+//   byte is aligned. Late garbage or optional-command ACK bytes such as 0x2D
+//   must be logged and discarded before the frame.
+//
 // Source-backed OpenGD77 CPS map for STM32 radios (MD-UV380 / RT84 / DM-1701):
 // - USB area 1 = direct SPI flash reads in usb_com.c
 // - USB area 2 = direct EEPROM reads in usb_com.c
@@ -307,6 +321,9 @@ function cprdLogReadResponseDiagnostics(raw, address, requestedLength, label = '
   });
 }
 
+// Strict R-frame reader used by radio info and memory reads. This intentionally
+// does not fall back to raw/length-prefixed parsing; if 0x52 never arrives, the
+// logs need to show exactly which bytes appeared before the timeout/failure.
 async function cprdReadRFrame(acc, context, options = {}) {
   const {
     timeoutMs = CPRD_CONNECT_TIMEOUT_MS,
@@ -776,6 +793,10 @@ async function cprdPrimeRadioConnection(writer, acc, { stealth = false } = {}) {
   void writer;
   void acc;
   void stealth;
+  // Read sessions intentionally skip the older C 00 / C FE experiments. On
+  // STM32 hardware the radio is already in USB_MODE_CPS, and sending those
+  // optional commands before the first R request proved capable of hiding the
+  // real radio-info response.
   console.log('[CPRD] skipping C init commands before USB CDC read');
 }
 
