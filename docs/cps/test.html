@@ -167,8 +167,8 @@
   'use strict';
 
   const BOOT_TEXT_OFFSET = 0x7540;
-  const BOOT_TEXT_LINE_LEN = 16;
-  const BOOT_TEXT_TOTAL_LEN = 32;
+  const TEST_BOOT_TEXT_LINE_LEN = 16;
+  const TEST_BOOT_TEXT_TOTAL_LEN = 32;
   const CODEPLUG_SIZE = 0x20000;
   const ASCII_RE = /^[\x20-\x7E]*$/;
 
@@ -233,21 +233,21 @@
 
   function getEditedLines() {
     return {
-      line1: (editLine1El.value || '').substring(0, BOOT_TEXT_LINE_LEN),
-      line2: (editLine2El.value || '').substring(0, BOOT_TEXT_LINE_LEN),
+      line1: (editLine1El.value || '').substring(0, TEST_BOOT_TEXT_LINE_LEN),
+      line2: (editLine2El.value || '').substring(0, TEST_BOOT_TEXT_LINE_LEN),
     };
   }
 
   function encodeBootTextBytes(lines) {
-    const out = new Uint8Array(BOOT_TEXT_TOTAL_LEN);
+    const out = new Uint8Array(TEST_BOOT_TEXT_TOTAL_LEN);
     out.fill(0xFF);
     [lines.line1 || '', lines.line2 || ''].forEach((text, lineIndex) => {
-      const clipped = String(text).substring(0, BOOT_TEXT_LINE_LEN);
+      const clipped = String(text).substring(0, TEST_BOOT_TEXT_LINE_LEN);
       if (!ASCII_RE.test(clipped)) {
         throw new Error(`Boot text line ${lineIndex + 1} must use printable ASCII characters only.`);
       }
       for (let i = 0; i < clipped.length; i++) {
-        out[lineIndex * BOOT_TEXT_LINE_LEN + i] = clipped.charCodeAt(i);
+        out[lineIndex * TEST_BOOT_TEXT_LINE_LEN + i] = clipped.charCodeAt(i);
       }
     });
     return out;
@@ -257,7 +257,7 @@
     if (arrayBuffer.byteLength < CODEPLUG_SIZE) {
       throw new Error(`Codeplug is ${arrayBuffer.byteLength} bytes — expected ${CODEPLUG_SIZE}.`);
     }
-    return new Uint8Array(arrayBuffer.slice(BOOT_TEXT_OFFSET, BOOT_TEXT_OFFSET + BOOT_TEXT_TOTAL_LEN));
+    return new Uint8Array(arrayBuffer.slice(BOOT_TEXT_OFFSET, BOOT_TEXT_OFFSET + TEST_BOOT_TEXT_TOTAL_LEN));
   }
 
   function compareBootTextBytes(expected, actual) {
