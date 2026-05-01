@@ -71,6 +71,30 @@
       font-size: 13px;
       margin: 0;
     }
+    .boot-mode-control {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .boot-mode-control label {
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+    .boot-mode-select {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 42px;
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+      font-size: 0.9rem;
+    }
+    .boot-mode-select option {
+      background: var(--surface);
+      color: var(--text);
+    }
   </style>
 </head>
 <body class="cps-layout">
@@ -147,15 +171,13 @@
                 <div class="test-current-value" id="boot-display-raw">—</div>
               </div>
             </div>
-            <div class="field-group">
-              <div class="field-row">
-                <span class="field-label">Set Mode</span>
-                <select id="boot-mode-select" class="field-select">
-                  <option value="">Choose target…</option>
-                  <option value="0">Picture</option>
-                  <option value="1">Text</option>
-                </select>
-              </div>
+            <div class="boot-mode-control">
+              <label for="boot-mode-select">Set Mode</label>
+              <select id="boot-mode-select" class="boot-mode-select">
+                <option value="">Choose target mode…</option>
+                <option value="0">Picture</option>
+                <option value="1">Text</option>
+              </select>
             </div>
             <div class="test-actions">
               <button class="btn-sm btn-sm-write" id="write-boot-mode-btn" type="button" disabled>Write Boot Mode Only</button>
