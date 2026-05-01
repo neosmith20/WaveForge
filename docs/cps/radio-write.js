@@ -5,7 +5,19 @@
 // The firmware exposes a proprietary CDC protocol when running normally.
 // USB VID/PID: 0x1FC9 / 0x0094 (usbd_desc.c)
 //
-// Write protocol: command 'X' (0x58), three sub-commands per 4 KB SPI Flash sector:
+// This file exposes the stable full-codeplug write path used by the production
+// CPS UI, plus a separate boot-text-only experimental helper:
+//
+//   0x57 0x04 addr_be32 len_be16 payload...
+//
+// The radio acknowledges that path with a reply beginning `57 04`.
+// Boot text lives at 0x7540 and is exactly 32 bytes:
+//   - line 1 = 16 bytes
+//   - line 2 = 16 bytes
+//   - ASCII text, padded with 0xFF
+//
+// Production full-codeplug protocol: command 'X' (0x58), three sub-commands per
+// 4 KB SPI Flash sector:
 //
 //   Sub 1 — Prepare sector (radio reads existing 4 KB into its sector buffer):
 //     Request: [0x58, 0x01, sector_hi, sector_mid, sector_lo]  (5 bytes)
@@ -41,9 +53,14 @@ const CPWR_CMD_BYTE_W  = 0x57;  // 'W'
 const CPWR_SUB_PREPARE = 0x01;
 const CPWR_SUB_SEND    = 0x02;
 const CPWR_SUB_WRITE   = 0x03;
+const CPWR_SUB_BOOT_TEXT = 0x04;
 const CPWR_SECTOR_SIZE = 4096;
 const CPWR_CHUNK       = 1024;  // modern OpenGD77 CPS uses 1024-byte USB buffers
 const CPWR_FILE_SIZE   = 0x20000;
+const CPWR_BOOT_TEXT_OFFSET = 0x7540;
+const CPWR_BOOT_TEXT_LENGTH = 32;
+const CPWR_BOOT_TEXT_LINE_LENGTH = 16;
+const CPWR_BOOT_TEXT_WRITE_SECTOR = 128;
 const CPWR_CODEPLUG_SEGMENTS = [
   { fileStart: 0x00080, fileEnd: 0x06000, radioStart: 0x00080, label: 'Codeplug block 1' },
   { fileStart: 0x06000, fileEnd: 0x0604A, radioStart: 0x06000, label: 'Last used channels' },
@@ -54,11 +71,11 @@ const CPWR_CODEPLUG_SEGMENTS = [
 
 // SerialAccumulator is defined in radio-read.js (loaded first); shared via global scope.
 
-// Send a write request and verify the 2-byte success response [0x58, subCmd].
-async function cpwrRequest(writer, acc, bytes, context) {
+// Send a write request and verify the expected acknowledgement prefix.
+async function cpwrRequest(writer, acc, bytes, context, expectedPrefix = [bytes[0], bytes[1]]) {
   await writer.write(bytes);
-  const r = await acc.readExact(1);
-  if (r[0] !== bytes[0]) {
+  const first = await acc.readExact(1);
+  if (first[0] !== expectedPrefix[0]) {
     const where = context ? ` (${context})` : '';
     throw new Error(
       `Radio returned an error during write${where}. ` +
@@ -67,7 +84,85 @@ async function cpwrRequest(writer, acc, bytes, context) {
       `If the error persists, power-cycle the radio and try again.`
     );
   }
-  await acc.readExact(1);  // subcommand echo
+  if (expectedPrefix.length > 1) {
+    const second = await acc.readExact(1);
+    if (second[0] !== expectedPrefix[1]) {
+      const where = context ? ` (${context})` : '';
+      throw new Error(
+        `Radio returned an unexpected acknowledgement during write${where}. ` +
+        `Expected 0x${expectedPrefix[1].toString(16).toUpperCase().padStart(2, '0')}, ` +
+        `received 0x${second[0].toString(16).toUpperCase().padStart(2, '0')}.`
+      );
+    }
+  }
+}
+
+function cpwrNormalizeBootTextBytes(arrayBuffer) {
+  const src = new Uint8Array(arrayBuffer);
+  if (src.length < CPWR_FILE_SIZE) {
+    throw new Error(`Codeplug is ${src.length} bytes — expected ${CPWR_FILE_SIZE}.`);
+  }
+
+  const out = new Uint8Array(CPWR_BOOT_TEXT_LENGTH);
+  out.fill(0xFF);
+
+  for (let line = 0; line < 2; line++) {
+    const srcBase = CPWR_BOOT_TEXT_OFFSET + line * CPWR_BOOT_TEXT_LINE_LENGTH;
+    const dstBase = line * CPWR_BOOT_TEXT_LINE_LENGTH;
+    let dstPos = dstBase;
+    for (let i = 0; i < CPWR_BOOT_TEXT_LINE_LENGTH; i++) {
+      const b = src[srcBase + i];
+      if (b === 0x00 || b === 0xFF) break;
+      if (b < 0x20 || b > 0x7E) {
+        throw new Error(
+          `Boot text line ${line + 1} contains a non-ASCII byte 0x${b.toString(16).toUpperCase().padStart(2, '0')}.`
+        );
+      }
+      out[dstPos++] = b;
+    }
+  }
+
+  return out;
+}
+
+function cpwrEnsureSingleWriteSector(address, length, sectorSize) {
+  const startSector = Math.floor(address / sectorSize);
+  const endSector = Math.floor((address + length - 1) / sectorSize);
+  if (startSector !== endSector) {
+    throw new Error(
+      `Refusing boot text write across ${sectorSize}-byte sector boundary ` +
+      `(0x${address.toString(16).toUpperCase()} + 0x${length.toString(16).toUpperCase()}).`
+    );
+  }
+}
+
+async function cpwrWriteBootTextFrame(writer, acc, payload) {
+  const req = new Uint8Array(8 + payload.length);
+  req[0] = CPWR_CMD_BYTE_W;
+  req[1] = CPWR_SUB_BOOT_TEXT;
+  req[2] = (CPWR_BOOT_TEXT_OFFSET >>> 24) & 0xFF;
+  req[3] = (CPWR_BOOT_TEXT_OFFSET >>> 16) & 0xFF;
+  req[4] = (CPWR_BOOT_TEXT_OFFSET >>> 8) & 0xFF;
+  req[5] = CPWR_BOOT_TEXT_OFFSET & 0xFF;
+  req[6] = (payload.length >>> 8) & 0xFF;
+  req[7] = payload.length & 0xFF;
+  req.set(payload, 8);
+  await cpwrRequest(writer, acc, req, 'write boot text', [CPWR_CMD_BYTE_W, CPWR_SUB_BOOT_TEXT]);
+}
+
+function cpwrVerifyBootTextExact(expected, actual) {
+  if (actual.length !== expected.length) {
+    throw new Error(`Boot text verify failed: expected ${expected.length} bytes, read ${actual.length}.`);
+  }
+  for (let i = 0; i < expected.length; i++) {
+    if (actual[i] !== expected[i]) {
+      throw new Error(
+        `Boot text verify mismatch at 0x${(CPWR_BOOT_TEXT_OFFSET + i).toString(16).toUpperCase()}: ` +
+        `wrote 0x${expected[i].toString(16).toUpperCase().padStart(2, '0')}, ` +
+        `read 0x${actual[i].toString(16).toUpperCase().padStart(2, '0')}.`
+      );
+    }
+  }
 }
 
 async function cpwrPrepareSector(writer, acc, address, writeByte) {
@@ -222,8 +317,6 @@ async function cpwrDrainBuffer(port) {
   }
 }
 
-// Write an ArrayBuffer codeplug to the radio via USB CDC.
-// onProgress({ phase: 'write', pct: 0-100, msg: string })
 async function cpwrWriteCodeplug(arrayBuffer, onProgress, options = {}) {
   if (!navigator.serial) {
     throw new Error('Web Serial API not available. Use Chrome or Edge 89+.');
@@ -237,7 +330,6 @@ async function cpwrWriteCodeplug(arrayBuffer, onProgress, options = {}) {
   try {
     session = await cprdOpenSerialSession(CPWR_SERIAL_FILTERS, 'cpwrWriteCodeplug', { claimIO: false });
     const { port } = session;
-    // Drain any stale bytes from the OS buffer before starting write commands.
     await cpwrDrainBuffer(port);
     cprdClaimSerialSessionIO(session);
     session.writer.__cprdSession = session;
@@ -289,5 +381,56 @@ async function cpwrWriteCodeplug(arrayBuffer, onProgress, options = {}) {
       try { await cprdEndCodeplugReadTask(session.writer, session.acc); } catch (_) {}
     }
     await cprdCloseSerialSession(session, taskMode ? `write operation aborted during ${taskMode}` : 'write operation completed');
+  }
+}
+
+// Write only the boot text block to the radio and verify it with an immediate
+// exact readback.
+async function cpwrWriteBootText(arrayBuffer, onProgress) {
+  if (!navigator.serial) {
+    throw new Error('Web Serial API not available. Use Chrome or Edge 89+.');
+  }
+
+  const bootTextBytes = cpwrNormalizeBootTextBytes(arrayBuffer);
+  cpwrEnsureSingleWriteSector(
+    CPWR_BOOT_TEXT_OFFSET,
+    CPWR_BOOT_TEXT_LENGTH,
+    CPWR_BOOT_TEXT_WRITE_SECTOR
+  );
+
+  let session = null;
+  let readTaskStarted = false;
+
+  try {
+    onProgress?.({ phase: 'write', pct: 0, msg: 'Connecting…' });
+    session = await cprdOpenSerialSession(CPWR_SERIAL_FILTERS, 'cpwrWriteBootText', { claimIO: false });
+    const { port } = session;
+    // Drain any stale bytes from the OS buffer before starting write commands.
+    await cpwrDrainBuffer(port);
+    cprdClaimSerialSessionIO(session);
+    session.writer.__cprdSession = session;
+    const { writer, acc } = session;
+    await cprdPrimeRadioConnection(writer, acc);
+    const radioInfo = await cprdReadRadioInfo(writer, acc);
+    if (!radioInfo.isSTM32) {
+      throw new Error(`Unsupported radio type ${radioInfo.radioType}. This boot-text write path is hardened only for STM32-family radios.`);
+    }
+    onProgress?.({ phase: 'write', pct: 35, msg: 'Writing boot text…' });
+    await cpwrWriteBootTextFrame(writer, acc, bootTextBytes);
+    await cprdBeginCodeplugReadTask(writer, acc);
+    readTaskStarted = true;
+    onProgress?.({ phase: 'verify', pct: 70, msg: 'Reading back boot text…' });
+    const readBack = await cprdReadChunk(writer, acc, CPRD_MODE_READ_FLASH, CPWR_BOOT_TEXT_OFFSET, CPWR_BOOT_TEXT_LENGTH, 0);
+    cpwrVerifyBootTextExact(bootTextBytes, readBack);
+    await cprdEndCodeplugReadTask(writer, acc);
+    readTaskStarted = false;
+
+    return { ok: true, radioInfo, bytes: bootTextBytes.slice() };
+
+  } finally {
+    if (readTaskStarted && session?.writer && session?.acc) {
+      try { await cprdEndCodeplugReadTask(session.writer, session.acc); } catch (_) {}
+    }
+    await cprdCloseSerialSession(session, readTaskStarted ? 'boot text write aborted during verify' : 'boot text write completed');
   }
 }

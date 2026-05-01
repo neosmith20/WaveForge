@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClearDMR Boot Text Write Test</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="cps.css">
+  <style>
+    .test-shell {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 24px 16px 48px;
+    }
+    .test-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 20px;
+    }
+    .test-title {
+      margin: 0 0 6px;
+      font-size: 28px;
+      line-height: 1.15;
+    }
+    .test-subtitle {
+      margin: 0;
+      color: var(--muted);
+    }
+    .test-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .test-current {
+      display: grid;
+      gap: 10px;
+    }
+    .test-current-row {
+      display: grid;
+      gap: 6px;
+    }
+    .test-current-value {
+      min-height: 42px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.03);
+      font: 600 14px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--text);
+      word-break: break-all;
+    }
+    .test-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .test-meta {
+      color: var(--muted);
+      font-size: 13px;
+      margin: 0;
+    }
+  </style>
+</head>
+<body class="cps-layout">
+
+  <header class="site-header">
+    <div class="container">
+      <div class="brand">
+        <a href="../index.html" class="brand-link"><span class="brand-name">ClearDMR</span></a>
+        <span class="brand-badge">Boot Text Test</span>
+      </div>
+      <p class="brand-tagline">
+        Experimental boot-text-only radio write path
+      </p>
+    </div>
+  </header>
+
+  <nav class="site-nav">
+    <div class="container">
+      <ul class="nav-links">
+        <li><a href="../index.html" class="nav-link">Flash</a></li>
+        <li><a href="../setup.html" class="nav-link">Setup Guide</a></li>
+        <li><a href="index.html" class="nav-link">CPS</a></li>
+        <li><a href="test.html" class="nav-link active">Boot Text Test</a></li>
+        <li><a href="../about.html" class="nav-link">About</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="cps-main">
+    <div class="test-shell">
+      <div class="test-header">
+        <div>
+          <h1 class="test-title">Boot Text Write Test</h1>
+          <p class="test-subtitle">Reads a full codeplug backup, edits only the boot text block, then writes and verifies just that 32-byte region.</p>
+        </div>
+        <a href="index.html" class="btn-sm btn-sm-outline">Back to Main CPS</a>
+      </div>
+
+      <div class="warn-banner">
+        <strong>Experimental boot text write test. Use at your own risk. Read and save a backup first.</strong>
+      </div>
+
+      <div class="section-card">
+        <div class="section-card-header"><h3>Workflow</h3></div>
+        <div class="section-card-body">
+          <div class="test-actions">
+            <button class="btn-sm btn-sm-read" id="read-btn" type="button">Read from Radio</button>
+            <button class="btn-sm btn-sm-outline" id="save-backup-btn" type="button" disabled>Save Backup</button>
+            <button class="btn-sm btn-sm-write" id="write-btn" type="button" disabled>Write Boot Text Only</button>
+            <button class="btn-sm btn-sm-outline" id="verify-btn" type="button" disabled>Read Back &amp; Verify</button>
+          </div>
+          <p class="test-meta" id="session-meta">No radio read yet.</p>
+          <div class="write-progress-wrap" id="progress-wrap">
+            <div class="write-progress-bar">
+              <div class="write-progress-fill" id="progress-fill"></div>
+            </div>
+            <div class="write-progress-label" id="progress-label">0%</div>
+          </div>
+          <p class="write-status" id="status"></p>
+        </div>
+      </div>
+
+      <div class="test-grid">
+        <div class="section-card">
+          <div class="section-card-header"><h3>Current on Radio</h3></div>
+          <div class="section-card-body">
+            <div class="test-current">
+              <div class="test-current-row">
+                <span class="field-label">Line 1</span>
+                <div class="test-current-value" id="current-line1">—</div>
+              </div>
+              <div class="test-current-row">
+                <span class="field-label">Line 2</span>
+                <div class="test-current-value" id="current-line2">—</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-card-header"><h3>Edit Boot Text</h3></div>
+          <div class="section-card-body">
+            <div class="field-group">
+              <div class="field-row">
+                <span class="field-label">Line 1</span>
+                <input type="text" id="edit-line1" class="field-input" maxlength="16" placeholder="ASCII only, max 16 chars">
+              </div>
+              <div class="field-row">
+                <span class="field-label">Line 2</span>
+                <input type="text" id="edit-line2" class="field-input" maxlength="16" placeholder="ASCII only, max 16 chars">
+              </div>
+            </div>
+            <p class="write-status muted" id="editor-status">Read the radio to load the current boot text.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="radio-read.js?v=20260428-simple-v1"></script>
+  <script src="radio-write.js"></script>
+  <script src="cps.js"></script>
+  <script>
+  'use strict';
+
+  const BOOT_TEXT_OFFSET = 0x7540;
+  const BOOT_TEXT_LINE_LEN = 16;
+  const BOOT_TEXT_TOTAL_LEN = 32;
+  const CODEPLUG_SIZE = 0x20000;
+  const ASCII_RE = /^[\x20-\x7E]*$/;
+
+  let loadedCodeplug = null;
+  let loadedFilename = '';
+  let sessionFreshRadioRead = false;
+  let sessionBackupSaved = false;
+  let busy = false;
+
+  const readBtn = document.getElementById('read-btn');
+  const saveBackupBtn = document.getElementById('save-backup-btn');
+  const writeBtn = document.getElementById('write-btn');
+  const verifyBtn = document.getElementById('verify-btn');
+  const progressWrap = document.getElementById('progress-wrap');
+  const progressFill = document.getElementById('progress-fill');
+  const progressLabel = document.getElementById('progress-label');
+  const statusEl = document.getElementById('status');
+  const sessionMetaEl = document.getElementById('session-meta');
+  const currentLine1El = document.getElementById('current-line1');
+  const currentLine2El = document.getElementById('current-line2');
+  const editLine1El = document.getElementById('edit-line1');
+  const editLine2El = document.getElementById('edit-line2');
+  const editorStatusEl = document.getElementById('editor-status');
+
+  function makeStamp() {
+    const d = new Date();
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  }
+
+  function setStatus(msg, cls = '') {
+    statusEl.textContent = msg;
+    statusEl.className = 'write-status' + (cls ? ' ' + cls : '');
+  }
+
+  function setEditorStatus(msg, cls = 'muted') {
+    editorStatusEl.textContent = msg;
+    editorStatusEl.className = 'write-status' + (cls ? ' ' + cls : '');
+  }
+
+  function setProgress(pct, msg = '') {
+    progressWrap.classList.add('visible');
+    progressFill.style.width = `${pct}%`;
+    progressLabel.textContent = `${pct}%`;
+    if (msg) setStatus(msg, 'muted');
+  }
+
+  function resetProgress() {
+    progressWrap.classList.remove('visible');
+    progressFill.style.width = '0%';
+    progressLabel.textContent = '0%';
+  }
+
+  function downloadBlob(name, blob) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function getEditedLines() {
+    return {
+      line1: (editLine1El.value || '').substring(0, BOOT_TEXT_LINE_LEN),
+      line2: (editLine2El.value || '').substring(0, BOOT_TEXT_LINE_LEN),
+    };
+  }
+
+  function encodeBootTextBytes(lines) {
+    const out = new Uint8Array(BOOT_TEXT_TOTAL_LEN);
+    out.fill(0xFF);
+    [lines.line1 || '', lines.line2 || ''].forEach((text, lineIndex) => {
+      const clipped = String(text).substring(0, BOOT_TEXT_LINE_LEN);
+      if (!ASCII_RE.test(clipped)) {
+        throw new Error(`Boot text line ${lineIndex + 1} must use printable ASCII characters only.`);
+      }
+      for (let i = 0; i < clipped.length; i++) {
+        out[lineIndex * BOOT_TEXT_LINE_LEN + i] = clipped.charCodeAt(i);
+      }
+    });
+    return out;
+  }
+
+  function extractBootTextBytes(arrayBuffer) {
+    if (arrayBuffer.byteLength < CODEPLUG_SIZE) {
+      throw new Error(`Codeplug is ${arrayBuffer.byteLength} bytes — expected ${CODEPLUG_SIZE}.`);
+    }
+    return new Uint8Array(arrayBuffer.slice(BOOT_TEXT_OFFSET, BOOT_TEXT_OFFSET + BOOT_TEXT_TOTAL_LEN));
+  }
+
+  function compareBootTextBytes(expected, actual) {
+    if (expected.length !== actual.length) {
+      throw new Error(`Verify failed: expected ${expected.length} bytes, read ${actual.length}.`);
+    }
+    for (let i = 0; i < expected.length; i++) {
+      if (expected[i] !== actual[i]) {
+        throw new Error(
+          `Verify mismatch at 0x${(BOOT_TEXT_OFFSET + i).toString(16).toUpperCase()}: ` +
+          `expected 0x${expected[i].toString(16).toUpperCase().padStart(2, '0')}, ` +
+          `read 0x${actual[i].toString(16).toUpperCase().padStart(2, '0')}.`
+        );
+      }
+    }
+  }
+
+  function renderCurrentBootText(parser) {
+    const text = parser.bootText;
+    currentLine1El.textContent = text.line1 || '—';
+    currentLine2El.textContent = text.line2 || '—';
+  }
+
+  function refreshSessionMeta() {
+    if (!loadedCodeplug) {
+      sessionMetaEl.textContent = 'No radio read yet.';
+      return;
+    }
+    const flags = [];
+    flags.push(`Source: ${loadedFilename || 'radio read'}`);
+    flags.push(sessionFreshRadioRead ? 'Fresh radio read: yes' : 'Fresh radio read: no');
+    flags.push(sessionBackupSaved ? 'Backup saved: yes' : 'Backup saved: no');
+    sessionMetaEl.textContent = flags.join(' • ');
+  }
+
+  function refreshButtons() {
+    const lines = getEditedLines();
+    const hasCodeplug = !!loadedCodeplug;
+    const asciiOk = ASCII_RE.test(lines.line1) && ASCII_RE.test(lines.line2);
+
+    readBtn.disabled = busy;
+    saveBackupBtn.disabled = busy || !hasCodeplug || !sessionFreshRadioRead;
+    verifyBtn.disabled = busy || !hasCodeplug;
+    writeBtn.disabled = busy || !hasCodeplug || !sessionFreshRadioRead || !sessionBackupSaved || !asciiOk;
+
+    if (!hasCodeplug) {
+      setEditorStatus('Read the radio to load the current boot text.', 'muted');
+    } else if (!asciiOk) {
+      setEditorStatus('Boot text must use printable ASCII characters only.', 'err');
+    } else if (!sessionFreshRadioRead) {
+      setEditorStatus('Read the radio again before any further write.', 'muted');
+    } else if (!sessionBackupSaved) {
+      setEditorStatus('Save a backup from this fresh read before writing.', 'muted');
+    } else {
+      setEditorStatus('Ready to write boot text only.', 'ok');
+    }
+
+    refreshSessionMeta();
+  }
+
+  function setLoadedCodeplug(buffer, filename, { syncEditor = false } = {}) {
+    loadedCodeplug = new CodeplugParser(buffer);
+    loadedCodeplug.filename = filename;
+    loadedFilename = filename;
+    renderCurrentBootText(loadedCodeplug);
+    if (syncEditor) {
+      const text = loadedCodeplug.bootText;
+      editLine1El.value = text.line1;
+      editLine2El.value = text.line2;
+    }
+    refreshButtons();
+  }
+
+  async function readFromRadio({ syncEditor = true, statusPrefix = 'Reading codeplug backup…' } = {}) {
+    busy = true;
+    resetProgress();
+    setStatus('Connecting…', 'muted');
+    refreshButtons();
+    try {
+      const result = await cpreadReadCodeplug(({ pct, msg }) => {
+        setProgress(pct, msg || statusPrefix);
+      });
+      const filename = `boottext_test_backup_${makeStamp()}.g77`;
+      sessionFreshRadioRead = true;
+      sessionBackupSaved = false;
+      setLoadedCodeplug(result.buffer, filename, { syncEditor });
+      progressFill.style.width = '100%';
+      progressLabel.textContent = '100%';
+      setStatus('Radio read complete. Save this backup before writing anything.', 'ok');
+      return result;
+    } finally {
+      busy = false;
+      refreshButtons();
+    }
+  }
+
+  readBtn.addEventListener('click', async () => {
+    try {
+      await readFromRadio({ syncEditor: true });
+    } catch (err) {
+      resetProgress();
+      if (err.name === 'NotFoundError') {
+        setStatus('No device selected.', 'muted');
+      } else {
+        setStatus(`Read failed: ${err.message}`, 'err');
+      }
+    }
+  });
+
+  saveBackupBtn.addEventListener('click', () => {
+    if (!loadedCodeplug) return;
+    const blob = new Blob([loadedCodeplug.toArrayBuffer()], { type: 'application/octet-stream' });
+    downloadBlob(loadedFilename || `boottext_test_backup_${makeStamp()}.g77`, blob);
+    sessionBackupSaved = true;
+    setStatus('Backup saved. You may now write boot text only.', 'ok');
+    refreshButtons();
+  });
+
+  writeBtn.addEventListener('click', async () => {
+    if (!loadedCodeplug || !sessionFreshRadioRead || !sessionBackupSaved) return;
+    busy = true;
+    resetProgress();
+    setStatus('Preparing boot text write…', 'muted');
+    refreshButtons();
+
+    try {
+      const lines = getEditedLines();
+      const writeBuffer = loadedCodeplug.toArrayBuffer();
+      const parser = new CodeplugParser(writeBuffer);
+      parser.writeBootText(lines);
+      await cpwrWriteBootText(writeBuffer, ({ pct, msg }) => {
+        setProgress(pct, msg || 'Writing boot text…');
+      });
+      loadedCodeplug = parser;
+      renderCurrentBootText(parser);
+      sessionFreshRadioRead = false;
+      sessionBackupSaved = false;
+      progressFill.style.width = '100%';
+      progressLabel.textContent = '100%';
+      setStatus('Write succeeded. Immediate readback matched exactly. Read the radio again before any further write.', 'ok');
+    } catch (err) {
+      resetProgress();
+      if (err.name === 'NotFoundError') {
+        setStatus('No device selected.', 'muted');
+      } else {
+        sessionFreshRadioRead = false;
+        sessionBackupSaved = false;
+        setStatus(`Write failed: ${err.message}`, 'err');
+      }
+    } finally {
+      busy = false;
+      refreshButtons();
+    }
+  });
+
+  verifyBtn.addEventListener('click', async () => {
+    if (!loadedCodeplug) return;
+    busy = true;
+    resetProgress();
+    setStatus('Reading back from radio for verification…', 'muted');
+    refreshButtons();
+
+    try {
+      const expected = encodeBootTextBytes(getEditedLines());
+      const result = await cpreadReadCodeplug(({ pct, msg }) => {
+        setProgress(pct, msg || 'Reading back from radio…');
+      });
+      const filename = `boottext_test_backup_${makeStamp()}.g77`;
+      sessionFreshRadioRead = true;
+      sessionBackupSaved = false;
+      setLoadedCodeplug(result.buffer, filename, { syncEditor: false });
+      const actual = extractBootTextBytes(result.buffer);
+      compareBootTextBytes(expected, actual);
+      progressFill.style.width = '100%';
+      progressLabel.textContent = '100%';
+      setStatus('Verification passed. The radio boot text matches the editor fields exactly. Save the fresh backup again before any write.', 'ok');
+    } catch (err) {
+      resetProgress();
+      if (err.name === 'NotFoundError') {
+        setStatus('No device selected.', 'muted');
+      } else {
+        setStatus(`Verification failed: ${err.message}`, 'err');
+      }
+    } finally {
+      busy = false;
+      refreshButtons();
+    }
+  });
+
+  [editLine1El, editLine2El].forEach(el => {
+    el.addEventListener('input', refreshButtons);
+  });
+
+  resetProgress();
+  refreshButtons();
+  </script>
+</body>
+</html>

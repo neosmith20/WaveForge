@@ -51,6 +51,7 @@ const LAST_USED_CHANNELS_MAGIC = 'LUCZ';
 const BOOT_IMAGE_W    = 128;
 const BOOT_IMAGE_H    = 64;
 const BOOT_IMAGE_SIZE = BOOT_IMAGE_W * BOOT_IMAGE_H / 8;  // 1024 bytes
+const BOOT_TEXT_LINE_LEN = 16;
 const BOOT_TUNE_MAX   = 255;
 const BOOT_TUNE_ENTRY = 2;
 const BOOT_TUNE_SIZE  = 512;
@@ -133,6 +134,29 @@ function writeString(view, offset, maxLen, str) {
   const encoded = new TextEncoder().encode((str || '').substring(0, maxLen));
   for (let i = 0; i < maxLen; i++) {
     view.setUint8(offset + i, i < encoded.length ? encoded[i] : 0xFF);
+  }
+}
+
+function readAsciiLine(view, offset, maxLen) {
+  const bytes = [];
+  for (let i = 0; i < maxLen; i++) {
+    const b = view.getUint8(offset + i);
+    if (b === 0x00 || b === 0xFF) break;
+    bytes.push(b);
+  }
+  return String.fromCharCode(...bytes);
+}
+
+function writeAsciiLine(view, offset, maxLen, str, fieldName = 'Text') {
+  const text = String(str || '').substring(0, maxLen);
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x20 || code > 0x7E) {
+      throw new Error(`${fieldName} must use printable ASCII characters only.`);
+    }
+  }
+  for (let i = 0; i < maxLen; i++) {
+    view.setUint8(offset + i, i < text.length ? text.charCodeAt(i) : 0xFF);
   }
 }
 
@@ -286,6 +310,20 @@ class CodeplugParser {
     writeString(v, base, 8, (gs.radioName || '').toUpperCase());
     v.setUint32(base + 8, byteSwap32(int2bcd(gs.dmrId || 0)), true);
     this._generalSettings = null;
+  }
+
+  // ── Boot text ────────────────────────────────────────────────────────────────
+
+  get bootText() {
+    return {
+      line1: readAsciiLine(this.view, ADDR.BOOT_LINE1, BOOT_TEXT_LINE_LEN),
+      line2: readAsciiLine(this.view, ADDR.BOOT_LINE2, BOOT_TEXT_LINE_LEN),
+    };
+  }
+
+  writeBootText({ line1 = '', line2 = '' }) {
+    writeAsciiLine(this.view, ADDR.BOOT_LINE1, BOOT_TEXT_LINE_LEN, line1, 'Boot text line 1');
+    writeAsciiLine(this.view, ADDR.BOOT_LINE2, BOOT_TEXT_LINE_LEN, line2, 'Boot text line 2');
   }
 
   // ── Channels ─────────────────────────────────────────────────────────────────
