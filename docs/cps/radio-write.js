@@ -6,11 +6,7 @@
 // USB VID/PID: 0x1FC9 / 0x0094 (usbd_desc.c)
 //
 // This file exposes the stable full-codeplug write path used by the production
-// CPS UI, plus a separate boot-text-only experimental helper:
-//
-//   0x58 0x04 addr_be32 len_be16 payload...
-//
-// The radio acknowledges that path with a reply beginning `58 04`.
+// CPS UI plus a boot-text-only helper built on the same sector overlay flow.
 // Boot text lives at 0x7540 and is exactly 32 bytes:
 //   - line 1 = 16 bytes
 //   - line 2 = 16 bytes
@@ -52,14 +48,12 @@ const CPWR_CMD_BYTE_X  = 0x58;  // 'X' real firmware write command
 const CPWR_SUB_PREPARE = 0x01;
 const CPWR_SUB_SEND    = 0x02;
 const CPWR_SUB_WRITE   = 0x03;
-const CPWR_SUB_BOOT_TEXT = 0x04;
 const CPWR_SECTOR_SIZE = 4096;
 const CPWR_CHUNK       = 1024;  // modern OpenGD77 CPS uses 1024-byte USB buffers
 const CPWR_FILE_SIZE   = 0x20000;
 const CPWR_BOOT_TEXT_OFFSET = 0x7540;
 const CPWR_BOOT_TEXT_LENGTH = 32;
 const CPWR_BOOT_TEXT_LINE_LENGTH = 16;
-const CPWR_BOOT_TEXT_WRITE_SECTOR = 128;
 const CPWR_CODEPLUG_SEGMENTS = [
   { fileStart: 0x00080, fileEnd: 0x06000, radioStart: 0x00080, label: 'Codeplug block 1' },
   { fileStart: 0x06000, fileEnd: 0x0604A, radioStart: 0x06000, label: 'Last used channels' },
@@ -72,7 +66,7 @@ const CPWR_CODEPLUG_SEGMENTS = [
 
 // Send a write request and verify the expected acknowledgement prefix.
 async function cpwrRequest(writer, acc, bytes, context, expectedPrefix = [bytes[0], bytes[1]]) {
-  await writer.write(bytes);
+  await cprdWriteBytes(writer, bytes, context);
   const first = await acc.readExact(1);
   if (first[0] !== expectedPrefix[0]) {
     const where = context ? ` (${context})` : '';
@@ -135,20 +129,6 @@ function cpwrEnsureSingleWriteSector(address, length, sectorSize) {
   }
 }
 
-async function cpwrWriteBootTextFrame(writer, acc, payload) {
-  const req = new Uint8Array(8 + payload.length);
-  req[0] = CPWR_CMD_BYTE_X;
-  req[1] = CPWR_SUB_BOOT_TEXT;
-  req[2] = (CPWR_BOOT_TEXT_OFFSET >>> 24) & 0xFF;
-  req[3] = (CPWR_BOOT_TEXT_OFFSET >>> 16) & 0xFF;
-  req[4] = (CPWR_BOOT_TEXT_OFFSET >>> 8) & 0xFF;
-  req[5] = CPWR_BOOT_TEXT_OFFSET & 0xFF;
-  req[6] = (payload.length >>> 8) & 0xFF;
-  req[7] = payload.length & 0xFF;
-  req.set(payload, 8);
-  await cpwrRequest(writer, acc, req, 'write boot text', [CPWR_CMD_BYTE_X, CPWR_SUB_BOOT_TEXT]);
-}
-
 function cpwrVerifyBootTextExact(expected, actual) {
   if (actual.length !== expected.length) {
     throw new Error(`Boot text verify failed: expected ${expected.length} bytes, read ${actual.length}.`);
@@ -195,6 +175,12 @@ async function cpwrWriteSector(writer, acc, address, writeByte) {
     new Uint8Array([writeByte, CPWR_SUB_WRITE]),
     `erase/write sector 0x${address.toString(16).toUpperCase().padStart(5, '0')}`
   );
+}
+
+async function cpwrWriteBootTextOverlay(writer, acc, payload, writeByte) {
+  await cpwrPrepareSector(writer, acc, CPWR_BOOT_TEXT_OFFSET, writeByte);
+  await cpwrSendData(writer, acc, CPWR_BOOT_TEXT_OFFSET, payload, writeByte);
+  await cpwrWriteSector(writer, acc, CPWR_BOOT_TEXT_OFFSET, writeByte);
 }
 
 async function cpwrWriteSegment(writer, acc, src, segment, progressState, onProgress, writeByte, chunkSize) {
@@ -394,7 +380,7 @@ async function cpwrWriteBootText(arrayBuffer, onProgress) {
   cpwrEnsureSingleWriteSector(
     CPWR_BOOT_TEXT_OFFSET,
     CPWR_BOOT_TEXT_LENGTH,
-    CPWR_BOOT_TEXT_WRITE_SECTOR
+    CPWR_SECTOR_SIZE
   );
 
   let session = null;
@@ -415,7 +401,7 @@ async function cpwrWriteBootText(arrayBuffer, onProgress) {
       throw new Error(`Unsupported radio type ${radioInfo.radioType}. This boot-text write path is hardened only for STM32-family radios.`);
     }
     onProgress?.({ phase: 'write', pct: 35, msg: 'Writing boot text…' });
-    await cpwrWriteBootTextFrame(writer, acc, bootTextBytes);
+    await cpwrWriteBootTextOverlay(writer, acc, bootTextBytes, CPWR_CMD_BYTE_X);
     await cprdBeginCodeplugReadTask(writer, acc);
     readTaskStarted = true;
     onProgress?.({ phase: 'verify', pct: 70, msg: 'Reading back boot text…' });
