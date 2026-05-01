@@ -59,7 +59,8 @@
       <button class="btn-sm btn-sm-outline" id="open-btn" type="button">Open .g77 / .cdmr</button>
       <button class="btn-sm btn-sm-read" id="read-btn" type="button">Read from Radio</button>
       <button class="btn-sm btn-sm-primary" id="save-btn" type="button" disabled>Save .cdmr</button>
-      <button class="btn-sm btn-sm-write" id="write-btn" type="button" disabled>Write to Radio</button>
+      <button class="btn-sm btn-sm-write" id="write-btn" type="button" disabled title="Full radio writes are disabled while write support is being hardware-tested.">Write to Radio</button>
+      <span id="write-disabled-note" style="margin-left:8px;font:12px/1.4 system-ui,sans-serif;color:#d6b363">Full radio writes are disabled for safety.</span>
       <span id="radio-read-version" style="margin-left:8px;font:12px monospace;color:#666"></span>
     </div>
   </div>
@@ -662,6 +663,10 @@
         Boot image and boot melody CustomData writes are still <strong>experimental</strong>
         until a full hardware round-trip passes. Keep readback verification enabled when testing them.
       </div>
+      <div class="write-note" style="border-color: rgba(214,179,99,.45); color: #f4dfab;">
+        <strong>Full codeplug write is not enabled yet.</strong>
+        Use the isolated Boot Text Test page for hardware-proven boot text and boot mode experiments.
+      </div>
       <div class="field-group">
         <div class="field-row">
           <span class="field-label">Verify After Write</span>
@@ -771,6 +776,10 @@
 
   let codeplug = null;
   let sessionWriteVerified = false;
+  const FULL_CODEPLUG_WRITE_ENABLED = false;
+  const FULL_CODEPLUG_WRITE_DISABLED_TITLE = 'Full radio writes are disabled while write support is being hardware-tested.';
+  const FULL_CODEPLUG_WRITE_BLOCK_MESSAGE =
+    'Full codeplug write is not enabled yet. Use the isolated Boot Text Test page for hardware-proven boot text/boot mode experiments.';
 
   // ── DOM refs ──────────────────────────────────────────────────────────────
 
@@ -778,6 +787,7 @@
   const openBtn     = document.getElementById('open-btn');
   const dropOpenBtn = document.getElementById('drop-open-btn');
   const saveBtn     = document.getElementById('save-btn');
+  const writeBtn    = document.getElementById('write-btn');
   const dropZone    = document.getElementById('drop-zone');
   const emptyState  = document.getElementById('empty-state');
   const tableArea   = document.getElementById('table-area');
@@ -925,7 +935,8 @@
     ibFilename.textContent = codeplug.filename || 'unknown';
     ibFilename.className   = 'filename-chip';
     saveBtn.disabled       = false;
-    writeBtn.disabled      = false;
+    writeBtn.disabled      = true;
+    writeBtn.title         = FULL_CODEPLUG_WRITE_DISABLED_TITLE;
     updateSessionVerifyIndicator();
 
     // Warn when the codeplug uses the original 16-channel-per-zone format.
@@ -1873,7 +1884,6 @@
 
   // ── Write to Radio ────────────────────────────────────────────────────────────
 
-  const writeBtn        = document.getElementById('write-btn');
   const writeModal      = document.getElementById('write-modal');
   const writeModalClose = document.getElementById('write-modal-close');
   const writeCancelBtn  = document.getElementById('write-cancel-btn');
@@ -1886,6 +1896,18 @@
   const writeProgressLabel = document.getElementById('write-progress-label');
 
   function openWriteModal() {
+    if (!FULL_CODEPLUG_WRITE_ENABLED) {
+      writeStatusEl.textContent = FULL_CODEPLUG_WRITE_BLOCK_MESSAGE;
+      writeStatusEl.className = 'write-status err';
+      writeProgressWrap.classList.remove('visible');
+      writeProgressFill.style.width = '0%';
+      writeProgressLabel.textContent = '0%';
+      writeConnectBtn.disabled = true;
+      writeExperimentalNoteEl.style.display = '';
+      writeExperimentalNoteEl.textContent = FULL_CODEPLUG_WRITE_BLOCK_MESSAGE;
+      writeModal.showModal();
+      return;
+    }
     writeStatusEl.textContent  = '';
     writeStatusEl.className    = 'write-status';
     writeProgressWrap.classList.remove('visible');
@@ -1923,6 +1945,11 @@
   writeModal.addEventListener('click', e => { if (e.target === writeModal) closeWriteModal(); });
 
   writeConnectBtn.addEventListener('click', async () => {
+    if (!FULL_CODEPLUG_WRITE_ENABLED) {
+      setWriteStatus(FULL_CODEPLUG_WRITE_BLOCK_MESSAGE, 'err');
+      writeConnectBtn.disabled = true;
+      return;
+    }
     if (!codeplug) return;
     writeConnectBtn.disabled = true;
     writeProgressWrap.classList.add('visible');
