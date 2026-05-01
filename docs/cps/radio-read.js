@@ -725,7 +725,10 @@ async function cprdNativeProbeCommand(writer, acc, commandNumber, {
   return response;
 }
 
-async function cprdSendCCommandAndExpectAck(writer, acc, commandByte, label) {
+async function cprdSendCCommandAndExpectAck(writer, acc, commandByte, label, options = {}) {
+  const {
+    drainAfterAck = true,
+  } = options;
   const req = new Uint8Array([CPRD_CMD_BYTE, commandByte & 0xFF]);
   await cprdWriteBytes(writer, req, label);
 
@@ -744,17 +747,22 @@ async function cprdSendCCommandAndExpectAck(writer, acc, commandByte, label) {
     ack: '0x2D',
   });
 
-  await cprdClearInputBuffer(acc, {
-    label: `${label} post-ack drain`,
-    idleMs: CPRD_C_COMMAND_POST_ACK_IDLE_MS,
-  });
+  if (drainAfterAck) {
+    await cprdClearInputBuffer(acc, {
+      label: `${label} post-ack drain`,
+      idleMs: CPRD_C_COMMAND_POST_ACK_IDLE_MS,
+    });
+  }
 }
 
 async function cprdPrimeRadioConnection(writer, acc, { stealth = false } = {}) {
   void stealth;
-  await cprdSendCCommandAndExpectAck(writer, acc, 0xFE, 'init C FE');
-  await cprdDelay(CPRD_INIT_SETTLE_MS);
-  await cprdSendCCommandAndExpectAck(writer, acc, 0x00, 'init C 00');
+  await cprdSendCCommandAndExpectAck(writer, acc, 0x00, 'init C 00', { drainAfterAck: false });
+  await cprdSendCCommandAndExpectAck(writer, acc, 0xFE, 'init C FE', { drainAfterAck: false });
+  await cprdClearInputBuffer(acc, {
+    label: 'init C command post-ack drain',
+    idleMs: CPRD_C_COMMAND_POST_ACK_IDLE_MS,
+  });
   await cprdDelay(CPRD_INIT_SETTLE_MS);
 }
 
