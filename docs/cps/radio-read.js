@@ -31,10 +31,7 @@ const CPRD_MODE_READ_RADIO_INFO = 0x09;
 const CPRD_BUFFER_DATE_CUTOFF   = 20211002;
 const CPRD_STM32_RADIO_TYPES    = new Set([5, 6, 7, 8, 9, 10]);
 const CPRD_CONNECT_TIMEOUT_MS   = 1000;
-const CPRD_INIT_SETTLE_MS       = 75;
 const CPRD_DRAIN_IDLE_MS        = 75;
-const CPRD_C_COMMAND_ACK_TIMEOUT_MS = 250;
-const CPRD_C_COMMAND_POST_ACK_IDLE_MS = 50;
 const CPRD_POST_INFO_SETTLE_MS  = 100;
 const CPRD_POST_INFO_IDLE_MS    = 150;
 const CPRD_CODEPLUG_SEGMENTS = [
@@ -725,45 +722,24 @@ async function cprdNativeProbeCommand(writer, acc, commandNumber, {
   return response;
 }
 
-async function cprdSendCCommandAndExpectAck(writer, acc, commandByte, label, options = {}) {
-  const {
-    drainAfterAck = true,
-  } = options;
-  const req = new Uint8Array([CPRD_CMD_BYTE, commandByte & 0xFF]);
-  await cprdWriteBytes(writer, req, label);
-
-  const ack = await acc.readExact(1, {
-    timeoutMs: CPRD_C_COMMAND_ACK_TIMEOUT_MS,
-    timeoutLabel: `${label} ACK`,
-  });
-  if (ack[0] !== 0x2D) {
-    throw new Error(
-      `${label} expected ACK 0x2D, got 0x${ack[0].toString(16).toUpperCase().padStart(2, '0')}.`
-    );
-  }
-
-  console.log('[CPRD] C command ACK received', {
-    label,
-    ack: '0x2D',
-  });
-
-  if (drainAfterAck) {
-    await cprdClearInputBuffer(acc, {
-      label: `${label} post-ack drain`,
-      idleMs: CPRD_C_COMMAND_POST_ACK_IDLE_MS,
-    });
-  }
-}
-
 async function cprdPrimeRadioConnection(writer, acc, { stealth = false } = {}) {
   void stealth;
-  await cprdSendCCommandAndExpectAck(writer, acc, 0x00, 'init C 00', { drainAfterAck: false });
-  await cprdSendCCommandAndExpectAck(writer, acc, 0xFE, 'init C FE', { drainAfterAck: false });
+
+  // Optional: show CPS screen on the radio. Firmware already boots in USB_MODE_CPS.
+  await cprdWriteBytes(writer, new Uint8Array([CPRD_CMD_BYTE, 0x00]), 'init C 00');
+  await cprdDelay(200);
   await cprdClearInputBuffer(acc, {
-    label: 'init C command post-ack drain',
-    idleMs: CPRD_C_COMMAND_POST_ACK_IDLE_MS,
+    label: 'after optional C 00',
+    idleMs: 100,
   });
-  await cprdDelay(CPRD_INIT_SETTLE_MS);
+
+  // Optional ping / GPS-NMEA stop helper.
+  await cprdWriteBytes(writer, new Uint8Array([CPRD_CMD_BYTE, 0xFE]), 'init C FE');
+  await cprdDelay(100);
+  await cprdClearInputBuffer(acc, {
+    label: 'after optional C FE',
+    idleMs: 100,
+  });
 }
 
 async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
