@@ -68,6 +68,7 @@ const CPWR_CODEPLUG_SEGMENTS = [
 async function cpwrRequest(writer, acc, bytes, context, expectedPrefix = [bytes[0], bytes[1]]) {
   await cprdWriteBytes(writer, bytes, context);
   const first = await acc.readExact(1);
+  cprdLogRaw('RX', first, `${context} ack byte 1`);
   if (first[0] !== expectedPrefix[0]) {
     const where = context ? ` (${context})` : '';
     throw new Error(
@@ -79,6 +80,7 @@ async function cpwrRequest(writer, acc, bytes, context, expectedPrefix = [bytes[
   }
   if (expectedPrefix.length > 1) {
     const second = await acc.readExact(1);
+    cprdLogRaw('RX', second, `${context} ack byte 2`);
     if (second[0] !== expectedPrefix[1]) {
       const where = context ? ` (${context})` : '';
       throw new Error(
@@ -178,6 +180,7 @@ async function cpwrWriteSector(writer, acc, address, writeByte) {
 }
 
 async function cpwrWriteBootTextOverlay(writer, acc, payload, writeByte) {
+  // STM32 firmware only commits flash through prepare/send/write sector commands.
   await cpwrPrepareSector(writer, acc, CPWR_BOOT_TEXT_OFFSET, writeByte);
   await cpwrSendData(writer, acc, CPWR_BOOT_TEXT_OFFSET, payload, writeByte);
   await cpwrWriteSector(writer, acc, CPWR_BOOT_TEXT_OFFSET, writeByte);
