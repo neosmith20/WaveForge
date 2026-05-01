@@ -26,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install toolchain
         run: |
@@ -43,7 +43,7 @@ jobs:
         run: cmake --build --preset ${{ matrix.preset }} -j$(nproc)
 
       - name: Upload firmware binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fw-${{ matrix.preset }}
           # Upload only the distribution binary (codec_cleaner output).
@@ -62,7 +62,7 @@ jobs:
 
     steps:
       - name: Download all firmware binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: fw-*
           merge-multiple: true
@@ -127,13 +127,13 @@ jobs:
 
     steps:
       - name: Checkout main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download all firmware binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: fw-*
           merge-multiple: true

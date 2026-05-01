@@ -32,7 +32,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install toolchain
         run: |
@@ -51,7 +51,7 @@ jobs:
         run: cmake --build --preset ${{ matrix.preset }} -j$(nproc)
 
       - name: Upload firmware artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.preset }}-${{ github.sha }}
           # Upload the distribution binary produced by codec_cleaner (ClearDMR_*.bin).
