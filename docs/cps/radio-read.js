@@ -310,39 +310,92 @@ function cprdLogReadResponseDiagnostics(raw, address, requestedLength, label = '
   });
 }
 
-function cprdAsciiPreview(bytes) {
-  if (!bytes || bytes.length === 0) return '';
-  return Array.from(bytes, b => (b >= 0x20 && b <= 0x7E ? String.fromCharCode(b) : '.')).join('');
-}
+async function cprdReadRFrame(acc, context, options = {}) {
+  const {
+    timeoutMs = CPRD_CONNECT_TIMEOUT_MS,
+    maxDiscard = 64,
+    maxLength = 2048,
+    expectedLength = null,
+  } = options;
 
-function cprdLooksLikeRadioInfoPayload(payload) {
-  if (!payload || payload.length < 40) return false;
+  const discarded = [];
 
-  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
-  const structVersion = view.getUint32(0, true);
-  const radioType = view.getUint32(4, true);
-  const buildDatePrefix = cprdAsciiPreview(payload.subarray(24, 32));
+  for (let i = 0; i <= maxDiscard; i++) {
+    let b;
+    try {
+      b = await acc.readExact(1, {
+        timeoutMs,
+        timeoutLabel: `${context} R sync byte`,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/Timed out waiting for .* R sync byte/i.test(message)) {
+        throw new Error(
+          `${context}: USB CDC protocol error: no R sync byte found before response frame. ` +
+          `Discarded ${discarded.length} byte(s): ${cprdHexAll(Uint8Array.from(discarded))}`
+        );
+      }
+      throw err;
+    }
 
-  return (
-    structVersion > 0 &&
-    structVersion < 0x100 &&
-    (CPRD_STM32_RADIO_TYPES.has(radioType) || (radioType > 0 && radioType < 32)) &&
-    /^\d{8}$/.test(buildDatePrefix)
-  );
-}
+    if (b[0] === CPRD_READ_BYTE) {
+      console.log('[CPRD] R sync byte found', {
+        context,
+        syncByte: `0x${CPRD_READ_BYTE.toString(16).toUpperCase()}`,
+        discardedBytes: discarded.length,
+      });
 
-function cprdIsStaleRadioInfoResponse(respLen, framing, headerBytes, acc) {
-  if (!(respLen === 46 && framing === 'R-framed')) {
-    return false;
+      if (discarded.length > 0) {
+        console.warn('[CPRD] discarded bytes before R sync', {
+          context,
+          discarded: cprdHexAll(Uint8Array.from(discarded)),
+        });
+      }
+
+      const lenBytes = await acc.readExact(2, {
+        timeoutMs,
+        timeoutLabel: `${context} R frame length`,
+      });
+      const len = (lenBytes[0] << 8) | lenBytes[1];
+      console.log('[CPRD] R frame length', {
+        context,
+        frameLength: len,
+        expectedLength,
+      });
+
+      if (len <= 0 || len > maxLength) {
+        throw new Error(`${context}: invalid R-frame length ${len}.`);
+      }
+
+      if (expectedLength != null && len !== expectedLength) {
+        throw new Error(`${context}: R-frame length mismatch. Expected ${expectedLength}, got ${len}.`);
+      }
+
+      const payload = await acc.readExact(len, {
+        timeoutMs,
+        timeoutLabel: `${context} R frame payload`,
+      });
+
+      return {
+        payload,
+        length: len,
+        headerBytes: Uint8Array.of(CPRD_READ_BYTE, lenBytes[0], lenBytes[1]),
+        discarded: Uint8Array.from(discarded),
+      };
+    }
+
+    discarded.push(b[0]);
+    console.warn('[CPRD] discarded pre-sync byte', {
+      context,
+      offset: discarded.length - 1,
+      byte: `0x${b[0].toString(16).toUpperCase().padStart(2, '0')}`,
+    });
   }
 
-  const pendingPreview = typeof acc.peekPending === 'function'
-    ? acc.peekPending(64)
-    : new Uint8Array(0);
-  const combined = cprdConcatBytes(headerBytes, pendingPreview);
-  if (combined.length < 3) return false;
-  const payloadPreview = combined.subarray(3);
-  return cprdLooksLikeRadioInfoPayload(payloadPreview);
+  throw new Error(
+    `${context}: USB CDC protocol error: no R sync byte found before response frame. ` +
+    `Discarded ${discarded.length} byte(s): ${cprdHexAll(Uint8Array.from(discarded))}`
+  );
 }
 
 async function cprdWriteBytes(writer, bytes, label = '') {
@@ -751,34 +804,18 @@ async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
   await cprdWriteBytes(writer, req, 'radio info request');
 
   try {
-    const firstByte = await acc.readExact(1, {
+    const {
+      payload,
+      length,
+    } = await cprdReadRFrame(acc, 'radio info read', {
       timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-      timeoutLabel: 'radio info first byte',
-    });
-
-    if (firstByte[0] !== CPRD_READ_BYTE) {
-      throw new Error(
-        `USB CDC protocol error during radio info read. Expected leading 0x${CPRD_READ_BYTE.toString(16).toUpperCase()}, ` +
-        `received 0x${firstByte[0].toString(16).toUpperCase().padStart(2, '0')}.`
-      );
-    }
-
-    const lenBytes = await acc.readExact(2, {
-      timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-      timeoutLabel: 'radio info length bytes',
-    });
-    const len = (lenBytes[0] << 8) | lenBytes[1];
-    if (len <= 0 || len > 64) {
-      throw new Error(`Radio info read failed. Unexpected R-framed length=0x${len.toString(16).toUpperCase()}.`);
-    }
-    const payload = await acc.readExact(len, {
-      timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-      timeoutLabel: 'radio info payload',
+      maxDiscard: 64,
+      maxLength: 64,
     });
 
     console.log('[CPRD] radio info response', {
       format: 'R-framed',
-      length: len,
+      length,
       payloadHex: cprdHexAll(payload),
     });
 
@@ -798,7 +835,7 @@ async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
     if (acc.getPendingLength() > 0) {
       const trailing = acc.peekPending(64);
       throw new Error(
-        `USB CDC protocol error after radio info read. Expected exactly ${len + 3} bytes, ` +
+        `USB CDC protocol error after radio info read. Expected exactly ${length + 3} bytes, ` +
         `but ${acc.getPendingLength()} trailing byte(s) remain in the accumulator. ` +
         `Trailing=${cprdHexAll(trailing)}.`
       );
@@ -838,44 +875,15 @@ async function cprdRequest(writer, acc, area, address, length, interReadDelayMs)
   });
   await cprdWriteBytes(writer, req, `read area=${area} addr=${addrHex} len=0x${length.toString(16).toUpperCase()}`);
   try {
-    const firstByte = await acc.readExact(1, {
+    const context = `memory read area=${area} addr=${addrHex}`;
+    const {
+      payload,
+      headerBytes,
+    } = await cprdReadRFrame(acc, context, {
       timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-      timeoutLabel: `read first byte ${addrHex}`,
-    });
-
-    if (firstByte[0] !== CPRD_READ_BYTE) {
-      throw new Error(
-        `USB CDC protocol error during memory read at area=${area} addr=${addrHex}. ` +
-        `Expected leading 0x${CPRD_READ_BYTE.toString(16).toUpperCase()}, ` +
-        `received 0x${firstByte[0].toString(16).toUpperCase().padStart(2, '0')}.`
-      );
-    }
-
-    const framing = 'R-framed';
-    const lenBytes = await acc.readExact(2, {
-      timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-      timeoutLabel: `read R-framed length prefix ${addrHex}`,
-    });
-    const headerBytes = cprdConcatBytes(firstByte, lenBytes);
-    const respLen = (lenBytes[0] << 8) | lenBytes[1];
-    if (respLen !== length) {
-      const pendingPreview = acc.peekPending(64);
-      const responsePreview = cprdConcatBytes(headerBytes, pendingPreview);
-      cprdLogReadResponseDiagnostics(responsePreview, address, length, `read response header mismatch addr=${addrHex}`);
-      if (cprdIsStaleRadioInfoResponse(respLen, framing, headerBytes, acc)) {
-        throw new Error(
-          `Stale radio info response received before codeplug block at area=${area} addr=${addrHex} (${framing}). ` +
-          `Expected 2-byte BE length ${length}, received ${respLen}.`
-        );
-      }
-      throw new Error(
-        `Read length prefix mismatch at area=${area} addr=${addrHex} (${framing}). ` +
-        `Expected 2-byte BE length ${length}, received ${respLen}.`
-      );
-    }
-    const payload = await acc.readExact(respLen, {
-      timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-      timeoutLabel: `read ${framing} payload ${addrHex}`,
+      maxDiscard: 64,
+      maxLength: Math.max(CPRD_MAX_CHUNK, 2048),
+      expectedLength: length,
     });
     cprdLogReadResponseDiagnostics(
       cprdConcatBytes(headerBytes, payload),
