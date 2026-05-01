@@ -31,9 +31,6 @@ const CPRD_MODE_READ_RADIO_INFO = 0x09;
 const CPRD_BUFFER_DATE_CUTOFF   = 20211002;
 const CPRD_STM32_RADIO_TYPES    = new Set([5, 6, 7, 8, 9, 10]);
 const CPRD_CONNECT_TIMEOUT_MS   = 1000;
-const CPRD_DRAIN_IDLE_MS        = 75;
-const CPRD_POST_INFO_SETTLE_MS  = 100;
-const CPRD_POST_INFO_IDLE_MS    = 150;
 const CPRD_CODEPLUG_SEGMENTS = [
   { fileStart: 0x00080, fileEnd: 0x06000, area: 1, radioStart: 0x00080, label: 'Codeplug block 1' },
   { fileStart: 0x06000, fileEnd: 0x0604A, area: 1, radioStart: 0x06000, label: 'Last used channels' },
@@ -776,23 +773,10 @@ async function cprdNativeProbeCommand(writer, acc, commandNumber, {
 }
 
 async function cprdPrimeRadioConnection(writer, acc, { stealth = false } = {}) {
+  void writer;
+  void acc;
   void stealth;
-
-  // Optional: show CPS screen on the radio. Firmware already boots in USB_MODE_CPS.
-  await cprdWriteBytes(writer, new Uint8Array([CPRD_CMD_BYTE, 0x00]), 'init C 00');
-  await cprdDelay(200);
-  await cprdClearInputBuffer(acc, {
-    label: 'after optional C 00',
-    idleMs: 100,
-  });
-
-  // Optional ping / GPS-NMEA stop helper.
-  await cprdWriteBytes(writer, new Uint8Array([CPRD_CMD_BYTE, 0xFE]), 'init C FE');
-  await cprdDelay(100);
-  await cprdClearInputBuffer(acc, {
-    label: 'after optional C FE',
-    idleMs: 100,
-  });
+  console.log('[CPRD] skipping C init commands before USB CDC read');
 }
 
 async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
@@ -952,7 +936,6 @@ async function cpreadReadCodeplug(onProgress, options = {}) {
     session.writer.__cprdSession = session;
     const { writer, acc } = session;
 
-    await cprdClearInputBuffer(acc, { label: 'cpread session start' });
     acc.resetState({ label: 'cpread session start', clearRecent: true, logDrop: false });
     console.log('[CPRD] read session reset', {
       rxBufferLength: acc.getPendingLength(),
@@ -964,11 +947,6 @@ async function cpreadReadCodeplug(onProgress, options = {}) {
     if (!radioInfo.isSTM32) {
       throw new Error(`Unsupported radio type ${radioInfo.radioType}. This browser CPS path currently matches the STM32-family OpenGD77 CPS model only.`);
     }
-    await cprdDelay(CPRD_POST_INFO_SETTLE_MS);
-    await cprdClearInputBuffer(acc, {
-      label: 'after radio info before codeplug reads',
-      idleMs: CPRD_POST_INFO_IDLE_MS,
-    });
     await cprdBeginCodeplugReadTask(writer, acc);
     taskStarted = true;
     chunkSize = Math.min(
@@ -1055,6 +1033,7 @@ async function cprawDumpRange(options, onProgress) {
     session = await cprdOpenSerialSession(CPRD_SERIAL_FILTERS, 'cprawDumpRange');
     session.writer.__cprdSession = session;
     const { writer, acc } = session;
+    acc.resetState({ label: 'cpraw session start', clearRecent: true, logDrop: false });
     await cprdPrimeRadioConnection(writer, acc);
     const radioInfo = await cprdReadRadioInfo(writer, acc);
     console.log('[CPRD] raw dump radio info', radioInfo);
