@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ClearDMR Boot Text Write Test</title>
+  <title>ClearDMR Boot Write Test</title>
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="cps.css">
   <style>
@@ -79,10 +79,10 @@
     <div class="container">
       <div class="brand">
         <a href="../index.html" class="brand-link"><span class="brand-name">ClearDMR</span></a>
-        <span class="brand-badge">Boot Text Test</span>
+        <span class="brand-badge">Boot Write Test</span>
       </div>
       <p class="brand-tagline">
-        Experimental boot-text-only radio write path
+        Experimental boot-settings radio write path
       </p>
     </div>
   </header>
@@ -103,14 +103,14 @@
     <div class="test-shell">
       <div class="test-header">
         <div>
-          <h1 class="test-title">Boot Text Write Test</h1>
-          <p class="test-subtitle">Reads a full codeplug backup, edits only the boot text block, then writes and verifies just that 32-byte region.</p>
+          <h1 class="test-title">Boot Text and Mode Write Test</h1>
+          <p class="test-subtitle">Reads a full codeplug backup, then writes and verifies either the boot text block or the boot display mode as an isolated test-page workflow.</p>
         </div>
         <a href="index.html" class="btn-sm btn-sm-outline">Back to Main CPS</a>
       </div>
 
       <div class="warn-banner">
-        <strong>Experimental boot text write test. Use at your own risk. Read and save a backup first.</strong>
+        <strong>Experimental boot-settings write test. Use at your own risk. Read and save a backup first.</strong>
       </div>
 
       <div class="section-card">
@@ -147,6 +147,20 @@
                 <div class="test-current-value" id="boot-display-raw">—</div>
               </div>
             </div>
+            <div class="field-group">
+              <div class="field-row">
+                <span class="field-label">Set Mode</span>
+                <select id="boot-mode-select" class="field-select">
+                  <option value="">Choose target…</option>
+                  <option value="0">Picture</option>
+                  <option value="1">Text</option>
+                </select>
+              </div>
+            </div>
+            <div class="test-actions">
+              <button class="btn-sm btn-sm-write" id="write-boot-mode-btn" type="button" disabled>Write Boot Mode Only</button>
+            </div>
+            <p class="write-status muted" id="boot-mode-status">Read the radio to load the current boot display mode.</p>
           </div>
         </div>
 
@@ -189,20 +203,21 @@
         <div class="section-card-body">
           <p class="test-meta">1. Read from Radio.</p>
           <p class="test-meta">2. Save Backup from that same fresh read.</p>
-          <p class="test-meta">3. Change only Line 1 and/or Line 2 using printable ASCII, max 16 chars each.</p>
-          <p class="test-meta">4. Run Write Boot Text Only and wait for the immediate readback verify to pass.</p>
-          <p class="test-meta">5. Run Read Back &amp; Verify, then save a fresh post-write backup if needed.</p>
-          <p class="test-meta">6. Power-cycle the radio and do another fresh read to confirm the text persisted.</p>
+          <p class="test-meta">3. Change either the boot text or the boot display mode. Do not combine them in one write yet.</p>
+          <p class="test-meta">4. Run either Write Boot Text Only or Write Boot Mode Only and wait for the immediate readback verify to pass.</p>
+          <p class="test-meta">5. Run Read Back &amp; Verify after text changes, then save a fresh post-write backup if needed.</p>
+          <p class="test-meta">6. Power-cycle the radio and do another fresh read to confirm the setting persisted.</p>
         </div>
       </div>
 
       <div class="section-card">
         <div class="section-card-header"><h3>Protocol Notes</h3></div>
         <div class="section-card-body">
-          <p class="test-meta">This page is the only place where the proven boot-text write path is exposed for now. The main CPS page stays read-only until more write paths are hardware-proven.</p>
+          <p class="test-meta">This page is the only place where the proven boot-text and boot-mode write paths are exposed for now. The main CPS page stays read-only until more write paths are hardware-proven.</p>
           <p class="test-meta">Read path: open the port, clear only buffered accumulator state, then send direct <code>R</code> requests. No <code>C 00</code> or <code>C FE</code> init commands are sent before reads.</p>
           <p class="test-meta">Read responses: every response is treated as a strict <code>R</code>-framed packet. The reader sync-scans for <code>0x52</code>, logs and discards any pre-sync bytes, then reads the big-endian payload length and exact payload.</p>
           <p class="test-meta">Boot text write path on STM32: <code>X 01</code> prepare the 4 KB sector containing <code>0x7540</code>, <code>X 02</code> overlay the 32 boot-text bytes, then <code>X 03</code> erase/program the sector. <code>X 04</code> must not be used on STM32 because it can ACK without modifying flash.</p>
+          <p class="test-meta">Boot display mode write path on STM32: <code>X 01</code> prepare the 4 KB sector containing <code>0x7518</code>, <code>X 02</code> overlay exactly one byte at <code>0x7518</code>, then <code>X 03</code> erase/program the sector. Immediate readback must return <code>0x00</code> for Picture or <code>0x01</code> for Text.</p>
         </div>
       </div>
     </div>
@@ -214,18 +229,26 @@
   <script>
   'use strict';
 
-  // Test-page-only boot text workflow. Keep this isolated here until broader
+  // Test-page-only boot-settings workflow. Keep this isolated here until broader
   // write paths are proven stable on hardware and deliberately integrated into
   // the main CPS UI.
-  // Boot display mode is read-only here for now:
-  //   0x7518 = 0x00 Picture, 0x01 Text/Chars
-  // Leave write support disabled until that path is proven on hardware too.
+  // Boot display mode at 0x7518 is hardware-confirmed on STM32 radios:
+  //   0x00 = Picture
+  //   0x01 = Text/Chars
+  // This page exposes a guarded one-byte mode write using the same STM32
+  // sector-overlay path as the proven boot-text write flow.
   const BOOT_DISPLAY_MODE_OFFSET = 0x7518;
+  const BOOT_DISPLAY_MODE_PICTURE = 0x00;
+  const BOOT_DISPLAY_MODE_TEXT = 0x01;
   const BOOT_TEXT_OFFSET = 0x7540;
   const TEST_BOOT_TEXT_LINE_LEN = 16;
   const TEST_BOOT_TEXT_TOTAL_LEN = 32;
   const CODEPLUG_SIZE = 0x20000;
   const ASCII_RE = /^[\x20-\x7E]*$/;
+  const TEST_SERIAL_FILTERS = [{ usbVendorId: 0x1FC9, usbProductId: 0x0094 }];
+  const TEST_WRITE_BYTE = 0x58;
+  const TEST_READ_FLASH_AREA = 0x01;
+  const TEST_STM32_SECTOR_SIZE = 4096;
 
   let loadedCodeplug = null;
   let loadedFilename = '';
@@ -244,6 +267,9 @@
   const sessionMetaEl = document.getElementById('session-meta');
   const bootDisplayModeEl = document.getElementById('boot-display-mode');
   const bootDisplayRawEl = document.getElementById('boot-display-raw');
+  const bootModeSelectEl = document.getElementById('boot-mode-select');
+  const writeBootModeBtn = document.getElementById('write-boot-mode-btn');
+  const bootModeStatusEl = document.getElementById('boot-mode-status');
   const currentLine1El = document.getElementById('current-line1');
   const currentLine2El = document.getElementById('current-line2');
   const editLine1El = document.getElementById('edit-line1');
@@ -264,6 +290,11 @@
   function setEditorStatus(msg, cls = 'muted') {
     editorStatusEl.textContent = msg;
     editorStatusEl.className = 'write-status' + (cls ? ' ' + cls : '');
+  }
+
+  function setBootModeStatus(msg, cls = 'muted') {
+    bootModeStatusEl.textContent = msg;
+    bootModeStatusEl.className = 'write-status' + (cls ? ' ' + cls : '');
   }
 
   function setProgress(pct, msg = '') {
@@ -336,11 +367,33 @@
     return `0x${value.toString(16).toUpperCase().padStart(2, '0')}`;
   }
 
+  function isKnownBootDisplayMode(rawValue) {
+    return rawValue === BOOT_DISPLAY_MODE_PICTURE || rawValue === BOOT_DISPLAY_MODE_TEXT;
+  }
+
+  function getSelectedBootModeValue() {
+    if (bootModeSelectEl.value === '0') {
+      return BOOT_DISPLAY_MODE_PICTURE;
+    }
+    if (bootModeSelectEl.value === '1') {
+      return BOOT_DISPLAY_MODE_TEXT;
+    }
+    return null;
+  }
+
+  function syncBootModeSelector(rawValue) {
+    bootModeSelectEl.value = rawValue === BOOT_DISPLAY_MODE_PICTURE
+      ? '0'
+      : rawValue === BOOT_DISPLAY_MODE_TEXT
+        ? '1'
+        : '';
+  }
+
   function decodeBootDisplayMode(rawValue) {
-    if (rawValue === 0x00) {
+    if (rawValue === BOOT_DISPLAY_MODE_PICTURE) {
       return 'Picture';
     }
-    if (rawValue === 0x01) {
+    if (rawValue === BOOT_DISPLAY_MODE_TEXT) {
       return 'Text';
     }
     return `Unknown (${formatHexByte(rawValue)})`;
@@ -374,11 +427,14 @@
     const lines = getEditedLines();
     const hasCodeplug = !!loadedCodeplug;
     const asciiOk = ASCII_RE.test(lines.line1) && ASCII_RE.test(lines.line2);
+    const selectedBootMode = getSelectedBootModeValue();
+    const bootModeSelected = selectedBootMode === BOOT_DISPLAY_MODE_PICTURE || selectedBootMode === BOOT_DISPLAY_MODE_TEXT;
 
     readBtn.disabled = busy;
     saveBackupBtn.disabled = busy || !hasCodeplug || !sessionFreshRadioRead;
     verifyBtn.disabled = busy || !hasCodeplug;
     writeBtn.disabled = busy || !hasCodeplug || !sessionFreshRadioRead || !sessionBackupSaved || !asciiOk;
+    writeBootModeBtn.disabled = busy || !hasCodeplug || !sessionFreshRadioRead || !sessionBackupSaved || !bootModeSelected;
 
     if (!hasCodeplug) {
       setEditorStatus('Read the radio to load the current boot text.', 'muted');
@@ -392,14 +448,29 @@
       setEditorStatus('Ready to write boot text only.', 'ok');
     }
 
+    if (!hasCodeplug) {
+      setBootModeStatus('Read the radio to load the current boot display mode.', 'muted');
+    } else if (!sessionFreshRadioRead) {
+      setBootModeStatus('Read the radio again before any further write.', 'muted');
+    } else if (!sessionBackupSaved) {
+      setBootModeStatus('Save a backup from this fresh read before writing.', 'muted');
+    } else if (!bootModeSelected) {
+      setBootModeStatus('Select Picture or Text before writing boot display mode.', 'muted');
+    } else {
+      setBootModeStatus('Ready to write boot display mode only.', 'ok');
+    }
+
     refreshSessionMeta();
   }
 
-  function setLoadedCodeplug(buffer, filename, { syncEditor = false } = {}) {
+  function setLoadedCodeplug(buffer, filename, { syncEditor = false, syncBootMode = true } = {}) {
     loadedCodeplug = new CodeplugParser(buffer);
     loadedCodeplug.filename = filename;
     loadedFilename = filename;
     renderBootDisplayMode(loadedCodeplug);
+    if (syncBootMode) {
+      syncBootModeSelector(loadedCodeplug.view.getUint8(BOOT_DISPLAY_MODE_OFFSET));
+    }
     renderCurrentBootText(loadedCodeplug);
     if (syncEditor) {
       const text = loadedCodeplug.bootText;
@@ -450,9 +521,68 @@
     const blob = new Blob([loadedCodeplug.toArrayBuffer()], { type: 'application/octet-stream' });
     downloadBlob(loadedFilename || `boottext_test_backup_${makeStamp()}.g77`, blob);
     sessionBackupSaved = true;
-    setStatus('Backup saved. You may now write boot text only.', 'ok');
+    setStatus('Backup saved. You may now write boot text only or boot mode only.', 'ok');
     refreshButtons();
   });
+
+  async function cpwrWriteBootDisplayMode(modeValue, onProgress) {
+    if (!navigator.serial) {
+      throw new Error('Web Serial API not available. Use Chrome or Edge 89+.');
+    }
+    if (!isKnownBootDisplayMode(modeValue)) {
+      throw new Error(`Refusing boot display mode write for invalid value ${formatHexByte(modeValue)}.`);
+    }
+
+    cpwrEnsureSingleWriteSector(
+      BOOT_DISPLAY_MODE_OFFSET,
+      1,
+      TEST_STM32_SECTOR_SIZE
+    );
+
+    const payload = Uint8Array.of(modeValue);
+    let session = null;
+    let readTaskStarted = false;
+
+    try {
+      onProgress?.({ phase: 'write', pct: 0, msg: 'Connecting…' });
+      session = await cprdOpenSerialSession(TEST_SERIAL_FILTERS, 'cpwrWriteBootDisplayMode', { claimIO: false });
+      const { port } = session;
+      await cpwrDrainBuffer(port);
+      cprdClaimSerialSessionIO(session);
+      session.writer.__cprdSession = session;
+      const { writer, acc } = session;
+      await cprdPrimeRadioConnection(writer, acc);
+      const radioInfo = await cprdReadRadioInfo(writer, acc);
+      if (!radioInfo.isSTM32) {
+        throw new Error(`Unsupported radio type ${radioInfo.radioType}. This boot-mode write path is hardened only for STM32-family radios.`);
+      }
+
+      onProgress?.({ phase: 'write', pct: 35, msg: 'Writing boot display mode…' });
+      await cpwrPrepareSector(writer, acc, BOOT_DISPLAY_MODE_OFFSET, TEST_WRITE_BYTE);
+      await cpwrSendData(writer, acc, BOOT_DISPLAY_MODE_OFFSET, payload, TEST_WRITE_BYTE);
+      await cpwrWriteSector(writer, acc, BOOT_DISPLAY_MODE_OFFSET, TEST_WRITE_BYTE);
+
+      await cprdBeginCodeplugReadTask(writer, acc);
+      readTaskStarted = true;
+      onProgress?.({ phase: 'verify', pct: 70, msg: 'Reading back boot display mode…' });
+      const readBack = await cprdReadChunk(writer, acc, TEST_READ_FLASH_AREA, BOOT_DISPLAY_MODE_OFFSET, 1, 0);
+      if (readBack.length !== 1 || readBack[0] !== modeValue) {
+        throw new Error(
+          `Boot display mode verify mismatch at 0x${BOOT_DISPLAY_MODE_OFFSET.toString(16).toUpperCase()}: ` +
+          `wrote ${formatHexByte(modeValue)}, read ${formatHexByte(readBack[0] ?? 0)}.`
+        );
+      }
+      await cprdEndCodeplugReadTask(writer, acc);
+      readTaskStarted = false;
+
+      return { ok: true, radioInfo, value: modeValue };
+    } finally {
+      if (readTaskStarted && session?.writer && session?.acc) {
+        try { await cprdEndCodeplugReadTask(session.writer, session.acc); } catch (_) {}
+      }
+      await cprdCloseSerialSession(session, readTaskStarted ? 'boot mode write aborted during verify' : 'boot mode write completed');
+    }
+  }
 
   writeBtn.addEventListener('click', async () => {
     if (!loadedCodeplug || !sessionFreshRadioRead || !sessionBackupSaved) return;
@@ -484,6 +614,46 @@
         sessionFreshRadioRead = false;
         sessionBackupSaved = false;
         setStatus(`Write failed: ${err.message}`, 'err');
+      }
+    } finally {
+      busy = false;
+      refreshButtons();
+    }
+  });
+
+  writeBootModeBtn.addEventListener('click', async () => {
+    if (!loadedCodeplug || !sessionFreshRadioRead || !sessionBackupSaved) return;
+    const selectedBootMode = getSelectedBootModeValue();
+    if (!isKnownBootDisplayMode(selectedBootMode)) return;
+
+    busy = true;
+    resetProgress();
+    setStatus('Preparing boot mode write…', 'muted');
+    refreshButtons();
+
+    try {
+      const writeBuffer = loadedCodeplug.toArrayBuffer();
+      const parser = new CodeplugParser(writeBuffer);
+      parser.view.setUint8(BOOT_DISPLAY_MODE_OFFSET, selectedBootMode);
+      await cpwrWriteBootDisplayMode(selectedBootMode, ({ pct, msg }) => {
+        setProgress(pct, msg || 'Writing boot display mode…');
+      });
+      loadedCodeplug = parser;
+      renderBootDisplayMode(parser);
+      syncBootModeSelector(selectedBootMode);
+      sessionFreshRadioRead = false;
+      sessionBackupSaved = false;
+      progressFill.style.width = '100%';
+      progressLabel.textContent = '100%';
+      setStatus('Boot mode write succeeded. Immediate readback matched exactly. Read the radio again before any further write.', 'ok');
+    } catch (err) {
+      resetProgress();
+      if (err.name === 'NotFoundError') {
+        setStatus('No device selected.', 'muted');
+      } else {
+        sessionFreshRadioRead = false;
+        sessionBackupSaved = false;
+        setStatus(`Boot mode write failed: ${err.message}`, 'err');
       }
     } finally {
       busy = false;
@@ -528,6 +698,7 @@
   [editLine1El, editLine2El].forEach(el => {
     el.addEventListener('input', refreshButtons);
   });
+  bootModeSelectEl.addEventListener('change', refreshButtons);
 
   resetProgress();
   refreshButtons();
