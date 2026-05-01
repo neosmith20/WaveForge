@@ -1,4 +1,85 @@
-# WaveForge Session Notes
+# ClearDMR Session Notes
+
+## Session 3 — 2026-05-01: Web CPS Read/Write Hardware Validation
+
+### What We Accomplished
+
+### 1. Web Serial radio read stabilized
+- Normal radio operating mode using USB CDC / Web Serial
+- VID/PID observed: `0x1FC9` / `0x0094`
+- Port settings: `115200 8N1`
+- Direct `R` requests are used
+- `C 00` / `C FE` init commands are skipped before reads
+- `R` responses are strict `R`-framed:
+  `[0] = 0x52`
+  `[1..2] = uint16 BE payload length`
+  `[3..n] = payload`
+- Reader uses `R` sync scanning because `0x52` often arrives as a separate 1-byte chunk
+
+### 2. Radio info confirmed
+- Radio info request:
+  `52 09 00 00 00 00 00 00`
+- Confirmed response is `R`-framed
+- Confirmed `radioType 10` for DM-1701 path
+
+### 3. Boot text write test hardware-proven
+- Isolated page: `docs/cps/test.html`
+- Boot text addresses:
+  `0x7540 = line 1, 16 bytes`
+  `0x7550 = line 2, 16 bytes`
+- Boot text uses printable ASCII with `0xFF` padding
+- Write requires:
+  `fresh radio read`
+  `saved backup`
+  `isolated Write Boot Text Only button`
+  `immediate readback verify`
+- Hardware tests passed:
+  `WRFS904 -> WRFS905`
+  `WRFS905 -> WRFS904`
+  verified after page refresh and radio power-cycle
+
+### 4. STM32 write path confirmed
+- Do not use `X 04` for STM32 boot text writes
+- `X 04` can ACK but does not modify flash
+- Proven working path is sector overlay:
+  `X 01` prepare 4 KB sector
+  `X 02` overlay changed bytes
+  `X 03` erase/program sector
+- This is used for boot text and boot mode test writes
+
+### 5. Boot display mode confirmed
+- Address: `0x7518`
+- Size: `1 byte`
+- `0x00 = Picture`
+- `0x01 = Text`
+- No checksum
+- Confirmed using official CPS and ClearDMR test page:
+  `Official CPS Picture -> ClearDMR reads Picture / 0x00`
+  `Official CPS Text -> ClearDMR reads Text / 0x01`
+- Test-page-only boot mode write succeeded
+
+### 6. Main CPS write safety
+- Main CPS full `Write to Radio` has been disabled/blocked for now
+- Reason: full-codeplug write is not hardware-proven yet
+- Isolated write paths remain only on `docs/cps/test.html`
+
+### Current Safe Status
+
+- `docs/cps/test.html`:
+  hardware-proven boot text write
+  hardware-proven boot mode write
+- `docs/cps/index.html`:
+  read/open/save/edit only
+  full radio write disabled
+- Main CPS integration should wait until isolated write paths are boringly stable
+
+### Next Steps
+
+- Add a verbose/debug logging toggle to reduce normal console spam
+- Continue testing boot text and boot mode isolated writes
+- Compare picture/text backups to document changed bytes
+- Later integrate boot text and boot mode controls into main CPS with the same guardrails
+- Do not enable full-codeplug write until separately validated
 
 ## Session 1 — 2026-04-24: CMake Migration & CI
 
@@ -136,7 +217,7 @@ features, major for breaking changes.
 ### 5. GUI Flasher — Idea Noted
 
 Discussed the idea of a small GUI flasher tool (Windows/macOS/Linux) that wraps the
-`st-flash` / OpenOCD command line so end-users can flash WaveForge without a terminal.
+`st-flash` / OpenOCD command line so end-users can flash ClearDMR without a terminal.
 Key UX goals: auto-detect connected ST-Link, present a file picker for the `.bin`,
 enforce the correct `0x800C000` flash address, and show progress. Captured in the
 roadmap below.
@@ -214,9 +295,9 @@ produce a zero-filled placeholder blob if the real blob is absent.
 
 ### Software / firmware
 - [ ] **CPS (Code Plug Software)** — update or rebuild the Code Plug Software for
-  WaveForge. The existing CPS references OpenGD77 branding and may have protocol
-  assumptions tied to upstream. Goal: a WaveForge-branded CPS that works out of the
-  box with WaveForge firmware.
+  ClearDMR. The existing CPS references OpenGD77 branding and may have protocol
+  assumptions tied to upstream. Goal: a ClearDMR-branded CPS that works out of the
+  box with ClearDMR firmware.
 - [ ] **FreeRTOS update** — bring FreeRTOS to the current upstream release. Audit
   the BSP tick config, heap scheme, and any OpenGD77-specific patches before merging.
 - [ ] **STM32 HAL driver updates** — update STM32 HAL/LL drivers to a recent STM32CubeF4
