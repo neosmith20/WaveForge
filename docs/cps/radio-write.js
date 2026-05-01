@@ -8,9 +8,9 @@
 // This file exposes the stable full-codeplug write path used by the production
 // CPS UI, plus a separate boot-text-only experimental helper:
 //
-//   0x57 0x04 addr_be32 len_be16 payload...
+//   0x58 0x04 addr_be32 len_be16 payload...
 //
-// The radio acknowledges that path with a reply beginning `57 04`.
+// The radio acknowledges that path with a reply beginning `58 04`.
 // Boot text lives at 0x7540 and is exactly 32 bytes:
 //   - line 1 = 16 bytes
 //   - line 2 = 16 bytes
@@ -48,8 +48,7 @@
 
 const CPWR_SERIAL_FILTERS = [{ usbVendorId: 0x1FC9, usbProductId: 0x0094 }];
 
-const CPWR_CMD_BYTE_X  = 0x58;  // 'X'
-const CPWR_CMD_BYTE_W  = 0x57;  // 'W'
+const CPWR_CMD_BYTE_X  = 0x58;  // 'X' real firmware write command
 const CPWR_SUB_PREPARE = 0x01;
 const CPWR_SUB_SEND    = 0x02;
 const CPWR_SUB_WRITE   = 0x03;
@@ -138,7 +137,7 @@ function cpwrEnsureSingleWriteSector(address, length, sectorSize) {
 
 async function cpwrWriteBootTextFrame(writer, acc, payload) {
   const req = new Uint8Array(8 + payload.length);
-  req[0] = CPWR_CMD_BYTE_W;
+  req[0] = CPWR_CMD_BYTE_X;
   req[1] = CPWR_SUB_BOOT_TEXT;
   req[2] = (CPWR_BOOT_TEXT_OFFSET >>> 24) & 0xFF;
   req[3] = (CPWR_BOOT_TEXT_OFFSET >>> 16) & 0xFF;
@@ -147,7 +146,7 @@ async function cpwrWriteBootTextFrame(writer, acc, payload) {
   req[6] = (payload.length >>> 8) & 0xFF;
   req[7] = payload.length & 0xFF;
   req.set(payload, 8);
-  await cpwrRequest(writer, acc, req, 'write boot text', [CPWR_CMD_BYTE_W, CPWR_SUB_BOOT_TEXT]);
+  await cpwrRequest(writer, acc, req, 'write boot text', [CPWR_CMD_BYTE_X, CPWR_SUB_BOOT_TEXT]);
 }
 
 function cpwrVerifyBootTextExact(expected, actual) {
@@ -341,7 +340,7 @@ async function cpwrWriteCodeplug(arrayBuffer, onProgress, options = {}) {
     }
     await cpwrBeginCodeplugWriteTask(writer, acc);
     taskMode = 'write';
-    const writeByte = radioInfo.isSTM32 ? CPWR_CMD_BYTE_X : CPWR_CMD_BYTE_W;
+    const writeByte = CPWR_CMD_BYTE_X;
     const chunkSize = Math.min(CPWR_CHUNK, radioInfo.usbBufferSize);
 
     if (src.length < CPWR_FILE_SIZE) {

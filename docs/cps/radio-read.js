@@ -35,7 +35,6 @@ const CPRD_INIT_SETTLE_MS       = 75;
 const CPRD_DRAIN_IDLE_MS        = 75;
 const CPRD_POST_INFO_SETTLE_MS  = 100;
 const CPRD_POST_INFO_IDLE_MS    = 150;
-const CPRD_INVALID_READ_PROBE_TOTAL_LEN = 46;
 const CPRD_CODEPLUG_SEGMENTS = [
   { fileStart: 0x00080, fileEnd: 0x06000, area: 1, radioStart: 0x00080, label: 'Codeplug block 1' },
   { fileStart: 0x06000, fileEnd: 0x0604A, area: 1, radioStart: 0x06000, label: 'Last used channels' },
@@ -269,59 +268,18 @@ function cprdConcatBytes(...parts) {
   return merged;
 }
 
-function cprdBuildReadRequestBytes(variantName, area, address, length) {
+function cprdBuildReadRequestBytes(area, address, length) {
   const req = new Uint8Array(8);
   req[0] = CPRD_READ_BYTE;
   req[1] = area & 0xFF;
-
-  switch (variantName) {
-    case 'fw-be32-be16':
-      req[2] = (address >>> 24) & 0xFF;
-      req[3] = (address >>> 16) & 0xFF;
-      req[4] = (address >>>  8) & 0xFF;
-      req[5] =  address         & 0xFF;
-      req[6] = (length  >>>  8) & 0xFF;
-      req[7] =  length          & 0xFF;
-      return req;
-
-    case 'addr-le32-len-le16':
-      req[2] =  address         & 0xFF;
-      req[3] = (address >>>  8) & 0xFF;
-      req[4] = (address >>> 16) & 0xFF;
-      req[5] = (address >>> 24) & 0xFF;
-      req[6] =  length          & 0xFF;
-      req[7] = (length  >>>  8) & 0xFF;
-      return req;
-
-    case 'addr-le32-len-be16':
-      req[2] =  address         & 0xFF;
-      req[3] = (address >>>  8) & 0xFF;
-      req[4] = (address >>> 16) & 0xFF;
-      req[5] = (address >>> 24) & 0xFF;
-      req[6] = (length  >>>  8) & 0xFF;
-      req[7] =  length          & 0xFF;
-      return req;
-
-    case 'addr-swap16-len-le16':
-      req[2] = (address >>>  8) & 0xFF;
-      req[3] =  address         & 0xFF;
-      req[4] = (address >>> 24) & 0xFF;
-      req[5] = (address >>> 16) & 0xFF;
-      req[6] =  length          & 0xFF;
-      req[7] = (length  >>>  8) & 0xFF;
-      return req;
-
-    default:
-      throw new Error(`Unsupported read request variant "${variantName}".`);
-  }
+  req[2] = (address >>> 24) & 0xFF;
+  req[3] = (address >>> 16) & 0xFF;
+  req[4] = (address >>>  8) & 0xFF;
+  req[5] =  address         & 0xFF;
+  req[6] = (length  >>>  8) & 0xFF;
+  req[7] =  length          & 0xFF;
+  return req;
 }
-
-const CPRD_READ_REQUEST_VARIANTS = [
-  { name: 'fw-be32-be16', recoverableInvalidOnly: true },
-  { name: 'addr-le32-len-le16', recoverableInvalidOnly: true },
-  { name: 'addr-le32-len-be16', recoverableInvalidOnly: true },
-  { name: 'addr-swap16-len-le16', recoverableInvalidOnly: true },
-];
 
 function cprdLogReadResponseDiagnostics(raw, address, requestedLength, label = 'read response') {
   const len16be = raw.length >= 2 ? ((raw[0] << 8) | raw[1]) : null;
@@ -375,7 +333,7 @@ function cprdLooksLikeRadioInfoPayload(payload) {
 }
 
 function cprdIsStaleRadioInfoResponse(respLen, framing, headerBytes, acc) {
-  if (!((respLen === 0 || respLen === 46) && framing === 'raw-length-prefixed')) {
+  if (!(respLen === 46 && framing === 'R-framed')) {
     return false;
   }
 
@@ -383,57 +341,9 @@ function cprdIsStaleRadioInfoResponse(respLen, framing, headerBytes, acc) {
     ? acc.peekPending(64)
     : new Uint8Array(0);
   const combined = cprdConcatBytes(headerBytes, pendingPreview);
-  if (combined.length < 6) return false;
-
-  if (respLen === 46) {
-    const payloadPreview = combined.subarray(2);
-    return cprdLooksLikeRadioInfoPayload(payloadPreview);
-  }
-
-  const shiftedPayloadPreview = combined.length > 2 ? combined.subarray(2) : new Uint8Array(0);
-  return cprdLooksLikeRadioInfoPayload(shiftedPayloadPreview);
-}
-
-function cprdIsAllZeroBytes(bytes, requiredLength = bytes?.length ?? 0) {
-  if (!bytes || bytes.length < requiredLength) return false;
-  for (let i = 0; i < requiredLength; i++) {
-    if (bytes[i] !== 0x00) return false;
-  }
-  return true;
-}
-
-function cprdIsInvalidReadCommandResponse(respLen, framing, headerBytes, acc) {
-  if (framing !== 'raw-length-prefixed') return false;
-
-  const pendingPreview = typeof acc.peekPending === 'function'
-    ? acc.peekPending(CPRD_INVALID_READ_PROBE_TOTAL_LEN)
-    : new Uint8Array(0);
-  const combined = cprdConcatBytes(headerBytes, pendingPreview);
-
-  if (respLen === 0 && cprdIsAllZeroBytes(combined, CPRD_INVALID_READ_PROBE_TOTAL_LEN)) {
-    return true;
-  }
-
-  if (respLen === CPRD_INVALID_READ_PROBE_TOTAL_LEN) {
-    const payloadPreview = combined.length > 2 ? combined.subarray(2) : new Uint8Array(0);
-    if (cprdIsAllZeroBytes(payloadPreview, CPRD_INVALID_READ_PROBE_TOTAL_LEN)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-async function cprdRecoverAfterInvalidReadResponse(acc, label) {
-  await cprdClearInputBuffer(acc, {
-    label,
-    idleMs: CPRD_POST_INFO_IDLE_MS,
-  });
-  acc.resetState({
-    label,
-    clearRecent: false,
-    logDrop: true,
-  });
+  if (combined.length < 3) return false;
+  const payloadPreview = combined.subarray(3);
+  return cprdLooksLikeRadioInfoPayload(payloadPreview);
 }
 
 async function cprdWriteBytes(writer, bytes, label = '') {
@@ -839,39 +749,28 @@ async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
       timeoutLabel: 'radio info first byte',
     });
 
-    let len = 0;
-    let payload = null;
-    let responseFormat = '';
-
-    if (firstByte[0] === CPRD_READ_BYTE) {
-      const lenBytes = await acc.readExact(2, {
-        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-        timeoutLabel: 'radio info length bytes',
-      });
-      len = (lenBytes[0] << 8) | lenBytes[1];
-      payload = await acc.readExact(len, {
-        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-        timeoutLabel: 'radio info payload',
-      });
-      responseFormat = 'R-framed';
-    } else {
-      const lenTail = await acc.readExact(1, {
-        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-        timeoutLabel: 'radio info raw length byte 2',
-      });
-      len = (firstByte[0] << 8) | lenTail[0];
-      if (len <= 0 || len > 64) {
-        throw new Error(`Radio info read failed. Unexpected raw length=0x${len.toString(16).toUpperCase()}.`);
-      }
-      payload = await acc.readExact(len, {
-        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-        timeoutLabel: 'radio info raw payload',
-      });
-      responseFormat = 'raw-length-prefixed';
+    if (firstByte[0] !== CPRD_READ_BYTE) {
+      throw new Error(
+        `USB CDC protocol error during radio info read. Expected leading 0x${CPRD_READ_BYTE.toString(16).toUpperCase()}, ` +
+        `received 0x${firstByte[0].toString(16).toUpperCase().padStart(2, '0')}.`
+      );
     }
 
+    const lenBytes = await acc.readExact(2, {
+      timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+      timeoutLabel: 'radio info length bytes',
+    });
+    const len = (lenBytes[0] << 8) | lenBytes[1];
+    if (len <= 0 || len > 64) {
+      throw new Error(`Radio info read failed. Unexpected R-framed length=0x${len.toString(16).toUpperCase()}.`);
+    }
+    const payload = await acc.readExact(len, {
+      timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+      timeoutLabel: 'radio info payload',
+    });
+
     console.log('[CPRD] radio info response', {
-      format: responseFormat,
+      format: 'R-framed',
       length: len,
       payloadHex: cprdHexAll(payload),
     });
@@ -890,12 +789,13 @@ async function cprdReadRadioInfo(writer, acc, { stealth = false } = {}) {
     });
 
     if (acc.getPendingLength() > 0) {
-      console.log('[CPRD] clearing residual radio info bytes', {
-        pendingBytes: acc.getPendingLength(),
-      });
-      acc.clearPending();
+      const trailing = acc.peekPending(64);
+      throw new Error(
+        `USB CDC protocol error after radio info read. Expected exactly ${len + 3} bytes, ` +
+        `but ${acc.getPendingLength()} trailing byte(s) remain in the accumulator. ` +
+        `Trailing=${cprdHexAll(trailing)}.`
+      );
     }
-    await cprdClearInputBuffer(acc, { label: 'after radio info decode' });
 
     return info;
   } catch (err) {
@@ -917,66 +817,49 @@ async function cprdEndCodeplugReadTask(writer, acc) {
   console.log('[CPRD] end read task: serial read protocol only');
 }
 
-async function cprdRequest(writer, acc, area, address, length, interReadDelayMs, options = {}) {
-  const {
-    requestVariantName = 'fw-be32-be16',
-  } = options;
-
+async function cprdRequest(writer, acc, area, address, length, interReadDelayMs) {
   if (interReadDelayMs > 0) await cprdDelay(interReadDelayMs);
 
-  const req = cprdBuildReadRequestBytes(requestVariantName, area, address, length);
+  const req = cprdBuildReadRequestBytes(area, address, length);
   const addrHex = `0x${address.toString(16).toUpperCase().padStart(5, '0')}`;
-  console.log('[CPRD] read request variant', {
-    variant: requestVariantName,
+  console.log('[CPRD] read request bytes', {
+    format: 'R area addr_be32 len_be16',
     area,
     address: addrHex,
     length: `0x${length.toString(16).toUpperCase()}`,
     hex: cprdHexAll(req),
   });
-  await cprdWriteBytes(writer, req, `read[${requestVariantName}] area=${area} addr=${addrHex} len=0x${length.toString(16).toUpperCase()}`);
+  await cprdWriteBytes(writer, req, `read area=${area} addr=${addrHex} len=0x${length.toString(16).toUpperCase()}`);
   try {
     const firstByte = await acc.readExact(1, {
       timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
       timeoutLabel: `read first byte ${addrHex}`,
     });
-    let framing = 'raw-length-prefixed';
-    let headerBytes = firstByte;
-    let lenBytes = null;
 
-    if (firstByte[0] === CPRD_READ_BYTE) {
-      framing = 'R-framed';
-      lenBytes = await acc.readExact(2, {
-        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-        timeoutLabel: `read R-framed length prefix ${addrHex}`,
-      });
-      headerBytes = cprdConcatBytes(firstByte, lenBytes);
-    } else {
-      const lenTail = await acc.readExact(1, {
-        timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
-        timeoutLabel: `read raw length byte 2 ${addrHex}`,
-      });
-      lenBytes = cprdConcatBytes(firstByte, lenTail);
-      headerBytes = lenBytes;
+    if (firstByte[0] !== CPRD_READ_BYTE) {
+      throw new Error(
+        `USB CDC protocol error during memory read at area=${area} addr=${addrHex}. ` +
+        `Expected leading 0x${CPRD_READ_BYTE.toString(16).toUpperCase()}, ` +
+        `received 0x${firstByte[0].toString(16).toUpperCase().padStart(2, '0')}.`
+      );
     }
 
+    const framing = 'R-framed';
+    const lenBytes = await acc.readExact(2, {
+      timeoutMs: CPRD_CONNECT_TIMEOUT_MS,
+      timeoutLabel: `read R-framed length prefix ${addrHex}`,
+    });
+    const headerBytes = cprdConcatBytes(firstByte, lenBytes);
     const respLen = (lenBytes[0] << 8) | lenBytes[1];
     if (respLen !== length) {
       const pendingPreview = acc.peekPending(64);
       const responsePreview = cprdConcatBytes(headerBytes, pendingPreview);
-      cprdLogReadResponseDiagnostics(responsePreview, address, length, `read response header mismatch addr=${addrHex} variant=${requestVariantName}`);
+      cprdLogReadResponseDiagnostics(responsePreview, address, length, `read response header mismatch addr=${addrHex}`);
       if (cprdIsStaleRadioInfoResponse(respLen, framing, headerBytes, acc)) {
         throw new Error(
           `Stale radio info response received before codeplug block at area=${area} addr=${addrHex} (${framing}). ` +
           `Expected 2-byte BE length ${length}, received ${respLen}.`
         );
-      }
-      if (cprdIsInvalidReadCommandResponse(respLen, framing, headerBytes, acc)) {
-        const invalidErr = new Error(
-          `Invalid read command response at area=${area} addr=${addrHex} variant=${requestVariantName} (${framing}). ` +
-          `Expected 2-byte BE length ${length}, received ${respLen}.`
-        );
-        invalidErr.cprdRecoverableInvalidReadCommand = true;
-        throw invalidErr;
       }
       throw new Error(
         `Read length prefix mismatch at area=${area} addr=${addrHex} (${framing}). ` +
@@ -991,28 +874,18 @@ async function cprdRequest(writer, acc, area, address, length, interReadDelayMs,
       cprdConcatBytes(headerBytes, payload),
       address,
       length,
-      `read response complete addr=${addrHex} variant=${requestVariantName}`
+      `read response complete addr=${addrHex}`
     );
     return payload;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const wrapped = new Error(`${message} Last RX=${acc.getRecentRxHex(96)}.`);
-    if (err && err.cprdRecoverableInvalidReadCommand) {
-      wrapped.cprdRecoverableInvalidReadCommand = true;
-    }
-    throw wrapped;
+    throw new Error(`${message} Last RX=${acc.getRecentRxHex(96)}.`);
   }
 }
 
-async function cprdReadChunk(writer, acc, area, address, length, interReadDelayMs, options = {}) {
-  const {
-    requestVariantName = 'fw-be32-be16',
-  } = options;
-
+async function cprdReadChunk(writer, acc, area, address, length, interReadDelayMs) {
   for (let attempt = 0; attempt <= CPRD_MAX_RETRIES; attempt++) {
-    const data = await cprdRequest(writer, acc, area, address, length, interReadDelayMs, {
-      requestVariantName,
-    });
+    const data = await cprdRequest(writer, acc, area, address, length, interReadDelayMs);
     if (data) {
       if (data.length !== length) {
         throw new Error(
@@ -1041,48 +914,6 @@ async function cprdReadChunk(writer, acc, area, address, length, interReadDelayM
   return null;
 }
 
-async function cprdReadChunkWithFramingProbe(writer, acc, area, address, length, interReadDelayMs, framingProbeState) {
-  if (framingProbeState?.confirmedVariantName) {
-    return cprdReadChunk(writer, acc, area, address, length, interReadDelayMs, {
-      requestVariantName: framingProbeState.confirmedVariantName,
-    });
-  }
-
-  let lastErr = null;
-  for (const variant of CPRD_READ_REQUEST_VARIANTS) {
-    try {
-      const data = await cprdReadChunk(writer, acc, area, address, length, interReadDelayMs, {
-        requestVariantName: variant.name,
-      });
-      if (framingProbeState) {
-        framingProbeState.confirmedVariantName = variant.name;
-      }
-      console.log('[CPRD] read framing locked', {
-        variant: variant.name,
-        area,
-        address: `0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
-        length,
-      });
-      return data;
-    } catch (err) {
-      lastErr = err;
-      if (!(err && err.cprdRecoverableInvalidReadCommand && variant.recoverableInvalidOnly)) {
-        throw err;
-      }
-
-      console.warn('[CPRD] read framing probe rejected variant', {
-        variant: variant.name,
-        area,
-        address: `0x${address.toString(16).toUpperCase().padStart(5, '0')}`,
-        reason: err.message,
-      });
-      await cprdRecoverAfterInvalidReadResponse(acc, `after invalid read variant ${variant.name}`);
-    }
-  }
-
-  throw lastErr || new Error('Unable to detect a working read request variant.');
-}
-
 async function cpreadReadCodeplug(onProgress, options = {}) {
   if (!navigator.serial) {
     throw new Error('Web Serial API not available. Use Chrome or Edge 89+.');
@@ -1096,9 +927,6 @@ async function cpreadReadCodeplug(onProgress, options = {}) {
   let session = null;
   let bytesRead = 0;
   let taskStarted = false;
-  const readFramingProbeState = {
-    confirmedVariantName: null,
-  };
   let chunkSize = Math.min(
     CPRD_MAX_CHUNK,
     Math.max(1, Number(options.chunkSize) || CPRD_CODEPLUG_CHUNK)
@@ -1140,11 +968,7 @@ async function cpreadReadCodeplug(onProgress, options = {}) {
 
       while (filePos < segment.fileEnd) {
         const len = Math.min(chunkSize, segment.fileEnd - filePos);
-        const data = (bytesRead === 0)
-          ? await cprdReadChunkWithFramingProbe(writer, acc, segment.area, radioAddr, len, interReadDelayMs, readFramingProbeState)
-          : await cprdReadChunk(writer, acc, segment.area, radioAddr, len, interReadDelayMs, {
-              requestVariantName: readFramingProbeState.confirmedVariantName || 'fw-be32-be16',
-            });
+        const data = await cprdReadChunk(writer, acc, segment.area, radioAddr, len, interReadDelayMs);
         if (!data || data.length !== len) {
           throw new Error(
             `Read failed at area=${segment.area} addr=0x${radioAddr.toString(16).toUpperCase().padStart(5, '0')} ` +
