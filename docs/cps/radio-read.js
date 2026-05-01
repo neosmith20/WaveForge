@@ -33,6 +33,8 @@ const CPRD_STM32_RADIO_TYPES    = new Set([5, 6, 7, 8, 9, 10]);
 const CPRD_CONNECT_TIMEOUT_MS   = 1000;
 const CPRD_INIT_SETTLE_MS       = 75;
 const CPRD_DRAIN_IDLE_MS        = 75;
+const CPRD_POST_INFO_SETTLE_MS  = 100;
+const CPRD_POST_INFO_IDLE_MS    = 150;
 const CPRD_CODEPLUG_SEGMENTS = [
   { fileStart: 0x00080, fileEnd: 0x06000, area: 1, radioStart: 0x00080, label: 'Codeplug block 1' },
   { fileStart: 0x06000, fileEnd: 0x0604A, area: 1, radioStart: 0x06000, label: 'Last used channels' },
@@ -296,6 +298,47 @@ function cprdLogReadResponseDiagnostics(raw, address, requestedLength, label = '
   });
 }
 
+function cprdAsciiPreview(bytes) {
+  if (!bytes || bytes.length === 0) return '';
+  return Array.from(bytes, b => (b >= 0x20 && b <= 0x7E ? String.fromCharCode(b) : '.')).join('');
+}
+
+function cprdLooksLikeRadioInfoPayload(payload) {
+  if (!payload || payload.length < 40) return false;
+
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const structVersion = view.getUint32(0, true);
+  const radioType = view.getUint32(4, true);
+  const buildDatePrefix = cprdAsciiPreview(payload.subarray(24, 32));
+
+  return (
+    structVersion > 0 &&
+    structVersion < 0x100 &&
+    (CPRD_STM32_RADIO_TYPES.has(radioType) || (radioType > 0 && radioType < 32)) &&
+    /^\d{8}$/.test(buildDatePrefix)
+  );
+}
+
+function cprdIsStaleRadioInfoResponse(respLen, framing, headerBytes, acc) {
+  if (!((respLen === 0 || respLen === 46) && framing === 'raw-length-prefixed')) {
+    return false;
+  }
+
+  const pendingPreview = typeof acc.peekPending === 'function'
+    ? acc.peekPending(64)
+    : new Uint8Array(0);
+  const combined = cprdConcatBytes(headerBytes, pendingPreview);
+  if (combined.length < 6) return false;
+
+  if (respLen === 46) {
+    const payloadPreview = combined.subarray(2);
+    return cprdLooksLikeRadioInfoPayload(payloadPreview);
+  }
+
+  const shiftedPayloadPreview = combined.length > 2 ? combined.subarray(2) : new Uint8Array(0);
+  return cprdLooksLikeRadioInfoPayload(shiftedPayloadPreview);
+}
+
 async function cprdWriteBytes(writer, bytes, label = '') {
   cprdLogRaw('TX', bytes, label);
   await writer.write(bytes);
@@ -430,6 +473,10 @@ class SerialAccumulator {
 
   getPendingLength() {
     return this._pending.length;
+  }
+
+  peekPending(maxBytes = this._pending.length) {
+    return this._pending.slice(0, Math.max(0, maxBytes));
   }
 
   getRecentRxByteCount() {
@@ -814,7 +861,15 @@ async function cprdRequest(writer, acc, area, address, length, interReadDelayMs)
 
     const respLen = (lenBytes[0] << 8) | lenBytes[1];
     if (respLen !== length) {
-      cprdLogReadResponseDiagnostics(headerBytes, address, length, `read response header mismatch addr=${addrHex}`);
+      const pendingPreview = acc.peekPending(64);
+      const responsePreview = cprdConcatBytes(headerBytes, pendingPreview);
+      cprdLogReadResponseDiagnostics(responsePreview, address, length, `read response header mismatch addr=${addrHex}`);
+      if (cprdIsStaleRadioInfoResponse(respLen, framing, headerBytes, acc)) {
+        throw new Error(
+          `Stale radio info response received before codeplug block at area=${area} addr=${addrHex} (${framing}). ` +
+          `Expected 2-byte BE length ${length}, received ${respLen}.`
+        );
+      }
       throw new Error(
         `Read length prefix mismatch at area=${area} addr=${addrHex} (${framing}). ` +
         `Expected 2-byte BE length ${length}, received ${respLen}.`
@@ -903,12 +958,18 @@ async function cpreadReadCodeplug(onProgress, options = {}) {
     if (!radioInfo.isSTM32) {
       throw new Error(`Unsupported radio type ${radioInfo.radioType}. This browser CPS path currently matches the STM32-family OpenGD77 CPS model only.`);
     }
+    await cprdDelay(CPRD_POST_INFO_SETTLE_MS);
+    await cprdClearInputBuffer(acc, {
+      label: 'after radio info before codeplug reads',
+      idleMs: CPRD_POST_INFO_IDLE_MS,
+    });
     await cprdBeginCodeplugReadTask(writer, acc);
     taskStarted = true;
     chunkSize = Math.min(
       CPRD_MAX_CHUNK,
       Math.max(1, Number(options.chunkSize) || radioInfo.usbBufferSize)
     );
+    acc.resetState({ label: 'before first codeplug block', clearRecent: true, logDrop: true });
 
     for (const segment of CPRD_CODEPLUG_SEGMENTS) {
       let filePos = segment.fileStart;
