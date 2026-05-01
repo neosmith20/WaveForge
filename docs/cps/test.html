@@ -135,6 +135,22 @@
 
       <div class="test-grid">
         <div class="section-card">
+          <div class="section-card-header"><h3>Boot Display Mode</h3></div>
+          <div class="section-card-body">
+            <div class="test-current">
+              <div class="test-current-row">
+                <span class="field-label">Mode</span>
+                <div class="test-current-value" id="boot-display-mode">—</div>
+              </div>
+              <div class="test-current-row">
+                <span class="field-label">Raw</span>
+                <div class="test-current-value" id="boot-display-raw">—</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-card">
           <div class="section-card-header"><h3>Current on Radio</h3></div>
           <div class="section-card-body">
             <div class="test-current">
@@ -201,6 +217,10 @@
   // Test-page-only boot text workflow. Keep this isolated here until broader
   // write paths are proven stable on hardware and deliberately integrated into
   // the main CPS UI.
+  // Boot display mode is read-only here for now:
+  //   0x7518 = 0x00 Picture, 0x01 Text/Chars
+  // Leave write support disabled until that path is proven on hardware too.
+  const BOOT_DISPLAY_MODE_OFFSET = 0x7518;
   const BOOT_TEXT_OFFSET = 0x7540;
   const TEST_BOOT_TEXT_LINE_LEN = 16;
   const TEST_BOOT_TEXT_TOTAL_LEN = 32;
@@ -222,6 +242,8 @@
   const progressLabel = document.getElementById('progress-label');
   const statusEl = document.getElementById('status');
   const sessionMetaEl = document.getElementById('session-meta');
+  const bootDisplayModeEl = document.getElementById('boot-display-mode');
+  const bootDisplayRawEl = document.getElementById('boot-display-raw');
   const currentLine1El = document.getElementById('current-line1');
   const currentLine2El = document.getElementById('current-line2');
   const editLine1El = document.getElementById('edit-line1');
@@ -310,6 +332,26 @@
     }
   }
 
+  function formatHexByte(value) {
+    return `0x${value.toString(16).toUpperCase().padStart(2, '0')}`;
+  }
+
+  function decodeBootDisplayMode(rawValue) {
+    if (rawValue === 0x00) {
+      return 'Picture';
+    }
+    if (rawValue === 0x01) {
+      return 'Text';
+    }
+    return `Unknown (${formatHexByte(rawValue)})`;
+  }
+
+  function renderBootDisplayMode(parser) {
+    const rawValue = parser.view.getUint8(BOOT_DISPLAY_MODE_OFFSET);
+    bootDisplayModeEl.textContent = decodeBootDisplayMode(rawValue);
+    bootDisplayRawEl.textContent = formatHexByte(rawValue);
+  }
+
   function renderCurrentBootText(parser) {
     const text = parser.bootText;
     currentLine1El.textContent = text.line1 || '—';
@@ -357,6 +399,7 @@
     loadedCodeplug = new CodeplugParser(buffer);
     loadedCodeplug.filename = filename;
     loadedFilename = filename;
+    renderBootDisplayMode(loadedCodeplug);
     renderCurrentBootText(loadedCodeplug);
     if (syncEditor) {
       const text = loadedCodeplug.bootText;
